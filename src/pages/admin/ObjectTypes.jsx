@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import Modal from '../../components/Modal'
-import { Plus, Trash2, Database, Star } from 'lucide-react'
+import { Plus, Trash2, Database, Star, Pencil } from 'lucide-react'
 
 const TYPES = ['text','textarea','number','currency','date','datetime','boolean','select','multiselect','email','phone']
 const slugify = s => s.toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')
@@ -80,7 +80,10 @@ export default function ObjectTypes() {
                           {f.is_status_field ? 'Status' : 'Set'}
                         </button>
                       </td>
-                      <td className="td text-right"><button className="btn-ghost text-danger !px-2" onClick={() => delField(f.id)}><Trash2 size={14} /></button></td>
+                      <td className="td text-right">
+                        <button className="btn-ghost !px-2" onClick={() => setFieldModal(f)}><Pencil size={14} /></button>
+                        <button className="btn-ghost text-danger !px-2" onClick={() => delField(f.id)}><Trash2 size={14} /></button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -93,6 +96,7 @@ export default function ObjectTypes() {
 
       {newType && <NameModal title="New record type" onClose={() => setNewType(false)} onSave={addType} />}
       {fieldModal && <FieldModal object_type_id={sel} count={defs.length} orgId={profile.org_id}
+        field={fieldModal.id ? fieldModal : null}
         onClose={() => setFieldModal(null)} onSaved={async () => { setFieldModal(null); await refresh() }} />}
     </div>
   )
@@ -111,30 +115,38 @@ function NameModal({ title, onClose, onSave }) {
   )
 }
 
-function FieldModal({ object_type_id, count, orgId, onClose, onSaved }) {
-  const [label, setLabel] = useState('')
-  const [type, setType] = useState('text')
-  const [required, setRequired] = useState(false)
-  const [options, setOptions] = useState('')
+function FieldModal({ field, object_type_id, count, orgId, onClose, onSaved }) {
+  const isEdit = !!field
+  const [label, setLabel] = useState(field?.label || '')
+  const [type, setType] = useState(field?.field_type || 'text')
+  const [required, setRequired] = useState(field?.is_required || false)
+  const [options, setOptions] = useState((field?.options || []).join(', '))
   const needsOptions = type === 'select' || type === 'multiselect'
 
   const save = async () => {
-    const { error } = await supabase.from('field_definitions').insert({
-      org_id: orgId, object_type_id, label,
-      key: slugify(label), field_type: type, is_required: required,
-      options: needsOptions ? options.split(',').map(s => s.trim()).filter(Boolean) : null,
-      sort_order: count
-    })
+    const payload = {
+      label, field_type: type, is_required: required,
+      options: needsOptions ? options.split(',').map(s => s.trim()).filter(Boolean) : null
+    }
+    const { error } = isEdit
+      ? await supabase.from('field_definitions').update(payload).eq('id', field.id)
+      : await supabase.from('field_definitions').insert({
+          org_id: orgId, object_type_id, key: slugify(label), sort_order: count, ...payload
+        })
     if (error) alert(error.message); else onSaved()
   }
 
   return (
-    <Modal title="Add field" onClose={onClose}
+    <Modal title={isEdit ? 'Edit field' : 'Add field'} onClose={onClose}
       footer={<><button className="btn-ghost" onClick={onClose}>Cancel</button>
-        <button className="btn-primary" disabled={!label.trim()} onClick={save}>Add field</button></>}>
+        <button className="btn-primary" disabled={!label.trim()} onClick={save}>{isEdit ? 'Save' : 'Add field'}</button></>}>
       <div className="space-y-3">
         <div><label className="label">Label</label>
           <input className="input" autoFocus value={label} onChange={e => setLabel(e.target.value)} /></div>
+        {isEdit && (
+          <div><label className="label">Key</label>
+            <input className="input bg-bg text-muted" value={field.key} disabled readOnly /></div>
+        )}
         <div><label className="label">Type</label>
           <select className="input" value={type} onChange={e => setType(e.target.value)}>
             {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
