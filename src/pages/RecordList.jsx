@@ -159,14 +159,16 @@ export default function RecordList() {
           {/* Mobile cards */}
           <div className="space-y-3 sm:hidden">
             {filtered.map(r => (
-              <button key={r.id} className="card w-full p-4 text-left" onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}>
+              <div key={r.id} role="button" tabIndex={0} className="card w-full cursor-pointer p-4 text-left"
+                onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}
+                onKeyDown={e => { if (e.key === 'Enter') nav(`/records/${objectTypeId}/${r.id}`) }}>
                 {cols.slice(0, 4).map(c => (
                   <div key={c.id} className="flex justify-between gap-3 py-0.5 text-sm">
                     <span className="text-muted">{c.label}</span>
                     <span className="text-right"><FieldValue field={c} value={r.data[c.key]} /></span>
                   </div>
                 ))}
-              </button>
+              </div>
             ))}
             {filtered.length === 0 && <p className="py-8 text-center text-sm text-muted">No records yet.</p>}
           </div>
@@ -295,9 +297,10 @@ function KanbanBoard({ columns, cols, objectTypeId, nav, isToday }) {
             {col.records.map(r => {
               const today = isToday(r)
               return (
-                <button key={r.id}
-                  className={`card w-full p-3 text-left transition-shadow hover:shadow-pop ${today ? 'border-warn ring-1 ring-warn/40' : ''}`}
-                  onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}>
+                <div key={r.id} role="button" tabIndex={0}
+                  className={`card w-full cursor-pointer p-3 text-left transition-shadow hover:shadow-pop ${today ? 'border-warn ring-1 ring-warn/40' : ''}`}
+                  onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}
+                  onKeyDown={e => { if (e.key === 'Enter') nav(`/records/${objectTypeId}/${r.id}`) }}>
                   {today && <span className="mb-1.5 inline-block rounded-full bg-warn px-2 py-0.5 text-[10px] font-semibold text-white">Today</span>}
                   {cols.map(c => (
                     <div key={c.id} className="flex justify-between gap-3 py-0.5 text-xs">
@@ -305,7 +308,7 @@ function KanbanBoard({ columns, cols, objectTypeId, nav, isToday }) {
                       <span className="text-right"><FieldValue field={c} value={r.data[c.key]} /></span>
                     </div>
                   ))}
-                </button>
+                </div>
               )
             })}
             {col.records.length === 0 && <p className="px-1 py-6 text-center text-xs text-muted">No records</p>}

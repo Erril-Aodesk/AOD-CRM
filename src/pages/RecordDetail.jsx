@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { FieldInput } from '../components/DynamicField'
+import { FieldInput, PhoneCopyButton } from '../components/DynamicField'
 import Spinner from '../components/Spinner'
 import { Trash2, ArrowLeft, Save } from 'lucide-react'
 
@@ -91,8 +91,16 @@ export default function RecordDetail() {
             return (
               <div key={f.id} className={f.field_type === 'textarea' ? 'sm:col-span-2' : ''}>
                 <label className="label">{f.label}{f.is_required && <span className="text-danger"> *</span>}</label>
-                <FieldInput field={f} value={data[f.key]} disabled={!editable}
-                  onChange={v => setData(d => ({ ...d, [f.key]: v }))} />
+                {f.field_type === 'phone' ? (
+                  <div className="flex items-center gap-2">
+                    <FieldInput field={f} value={data[f.key]} disabled={!editable}
+                      onChange={v => setData(d => ({ ...d, [f.key]: v }))} />
+                    <PhoneCopyButton value={data[f.key]} />
+                  </div>
+                ) : (
+                  <FieldInput field={f} value={data[f.key]} disabled={!editable}
+                    onChange={v => setData(d => ({ ...d, [f.key]: v }))} />
+                )}
               </div>
             )
           })}

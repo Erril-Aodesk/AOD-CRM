@@ -1,4 +1,41 @@
 // Renders the correct input for a field definition, or a read-only value.
+import { useState } from 'react'
+import { Copy, Check } from 'lucide-react'
+
+const cleanPhone = (value) => {
+  const str = String(value ?? '').trim()
+  if (!str) return ''
+  const plus = str.startsWith('+') ? '+' : ''
+  return plus + str.replace(/[^0-9]/g, '')
+}
+
+export function PhoneCopyButton({ value }) {
+  const [copied, setCopied] = useState(false)
+
+  const copy = async (e) => {
+    e.stopPropagation()
+    e.preventDefault()
+    const number = cleanPhone(value)
+    if (!number) return
+    await navigator.clipboard.writeText(number)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1200)
+  }
+
+  return (
+    <span className="relative inline-flex shrink-0">
+      <button type="button" className="text-muted hover:text-brand" title="Copy number" aria-label="Copy phone number" onClick={copy}>
+        {copied ? <Check size={13} className="text-ok" /> : <Copy size={13} />}
+      </button>
+      {copied && (
+        <span className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-ink px-1.5 py-0.5 text-[10px] text-white">
+          Copied
+        </span>
+      )}
+    </span>
+  )
+}
+
 export function FieldInput({ field, value, onChange, disabled }) {
   const v = value ?? ''
   const common = 'input'
@@ -59,5 +96,13 @@ export function FieldValue({ field, value }) {
   if (field.field_type === 'boolean') return value ? 'Yes' : 'No'
   if (field.field_type === 'multiselect' && Array.isArray(value)) return value.join(', ')
   if (field.field_type === 'currency') return typeof value === 'number' ? value.toLocaleString(undefined,{style:'currency',currency:'USD'}) : value
+  if (field.field_type === 'phone') {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        {String(value)}
+        <PhoneCopyButton value={value} />
+      </span>
+    )
+  }
   return String(value)
 }
