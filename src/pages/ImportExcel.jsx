@@ -47,7 +47,7 @@ export default function ImportExcel() {
         if (f.field_type === 'boolean') val = ['true','yes','1','y'].includes(String(val).toLowerCase())
         data[f.key] = val
       })
-      return { org_id: ot.org_id, object_type_id: otId, owner_id: profile.id, created_by: profile.id, data }
+      return { org_id: ot.org_id, object_type_id: otId, owner_id: ot.default_agent_id || profile.id, created_by: profile.id, data }
     })
     // insert in chunks of 500
     let ok = 0, fail = 0

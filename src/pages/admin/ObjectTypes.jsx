@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import Modal from '../../components/Modal'
@@ -12,9 +12,17 @@ export default function ObjectTypes() {
   const [sel, setSel] = useState(objectTypes[0]?.id || '')
   const [newType, setNewType] = useState(false)
   const [fieldModal, setFieldModal] = useState(null)
+  const [users, setUsers] = useState([])
 
   const current = objectTypes.find(o => o.id === sel)
   const defs = fields.filter(f => f.object_type_id === sel).sort((a,b)=>a.sort_order-b.sort_order)
+
+  useEffect(() => {
+    if (!profile?.org_id) return
+    supabase.from('profiles').select('id, full_name, email')
+      .eq('org_id', profile.org_id).eq('is_active', true).order('full_name')
+      .then(({ data }) => setUsers(data || []))
+  }, [profile?.org_id])
 
   const addType = async (name) => {
     const { error } = await supabase.from('object_types')
@@ -27,6 +35,10 @@ export default function ObjectTypes() {
   }
   const delField = async (id) => {
     await supabase.from('field_definitions').delete().eq('id', id); await refresh()
+  }
+  const setDefaultAgent = async (agentId) => {
+    await supabase.from('object_types').update({ default_agent_id: agentId || null }).eq('id', sel)
+    await refresh()
   }
   const setStatus = async (f) => {
     // clear existing status field for this type, then set this one
@@ -63,6 +75,14 @@ export default function ObjectTypes() {
                 <Plus size={15} /> Add field
               </button>
               <button className="btn-ghost text-danger" onClick={() => delType(sel)}><Trash2 size={15} /></button>
+            </div>
+            <div className="mb-4 flex items-center gap-2">
+              <label className="label !mb-0">Default agent</label>
+              <select className="input w-56" value={current.default_agent_id || ''}
+                onChange={e => setDefaultAgent(e.target.value)}>
+                <option value="">— None (falls back to current user) —</option>
+                {users.map(u => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
+              </select>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[560px]">

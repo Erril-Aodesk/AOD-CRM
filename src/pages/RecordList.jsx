@@ -9,7 +9,7 @@ import { Plus, Search, Trash2, Check, List, LayoutGrid } from 'lucide-react'
 
 export default function RecordList() {
   const { objectTypeId } = useParams()
-  const { objectTypes, fields, perms } = useAuth()
+  const { objectTypes, fields, perms, profile } = useAuth()
   const nav = useNavigate()
   const [rows, setRows] = useState(null)
   const [q, setQ] = useState('')
@@ -68,7 +68,7 @@ export default function RecordList() {
   const create = async () => {
     const { data, error } = await supabase.from('records')
       .insert({ object_type_id: objectTypeId, data: {},
-                owner_id: (await supabase.auth.getUser()).data.user.id,
+                owner_id: ot.default_agent_id || profile.id,
                 org_id: ot.org_id }).select().single()
     if (!error && data) nav(`/records/${objectTypeId}/${data.id}`)
     else alert(error?.message)
