@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { FieldValue } from '../components/DynamicField'
 import Spinner from '../components/Spinner'
 import Modal from '../components/Modal'
-import { Plus, Search, Trash2, Check } from 'lucide-react'
+import { Plus, Search, Trash2, Check, List, LayoutGrid } from 'lucide-react'
 
 export default function RecordList() {
   const { objectTypeId } = useParams()
@@ -15,12 +15,14 @@ export default function RecordList() {
   const [q, setQ] = useState('')
   const [deleteAll, setDeleteAll] = useState(false)
   const [toast, setToast] = useState('')
+  const [view, setView] = useState('list')
 
   const ot = objectTypes.find(o => o.id === objectTypeId)
   const cols = useMemo(() =>
     fields.filter(f => f.object_type_id === objectTypeId && f.show_in_list !== false && perms?.fieldVisible(f.id))
           .sort((a, b) => a.sort_order - b.sort_order),
     [fields, objectTypeId, perms])
+  const statusField = fields.find(f => f.object_type_id === objectTypeId && f.is_status_field)
 
   const loadRows = () =>
     supabase.from('records').select('*').eq('object_type_id', objectTypeId)
@@ -68,11 +70,23 @@ export default function RecordList() {
     ? rows.filter(r => JSON.stringify(r.data).toLowerCase().includes(q.toLowerCase()))
     : rows
 
+  const statusOptions = statusField?.options || []
+  const kanbanColumns = statusField
+    ? [...statusOptions.map(o => ({ key: o, label: o, records: filtered.filter(r => r.data[statusField.key] === o) })),
+       { key: '__none', label: '—', records: filtered.filter(r => !statusOptions.includes(r.data[statusField.key])) }]
+    : null
+
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold">{ot.name}</h1>
         <span className="chip bg-brand-soft text-brand-dark">{rows.length}</span>
+        <div className="inline-flex rounded-lg border border-line p-0.5">
+          <button className={`rounded-md px-2.5 py-1.5 ${view === 'list' ? 'bg-brand text-white' : 'text-muted hover:text-ink'}`}
+            title="List view" onClick={() => setView('list')}><List size={15} /></button>
+          <button className={`rounded-md px-2.5 py-1.5 ${view === 'kanban' ? 'bg-brand text-white' : 'text-muted hover:text-ink'}`}
+            title="Kanban view" onClick={() => setView('kanban')}><LayoutGrid size={15} /></button>
+        </div>
         <div className="ml-auto flex items-center gap-2">
           <div className="relative">
             <Search size={15} className="pointer-events-none absolute left-2.5 top-2.5 text-muted" />
@@ -87,49 +101,66 @@ export default function RecordList() {
         </div>
       </div>
 
-      {/* Desktop table */}
-      <div className="card hidden overflow-x-auto sm:block">
-        <table className="w-full min-w-[640px]">
-          <thead><tr>{cols.map(c => <th key={c.id} className="th">{c.label}</th>)}</tr></thead>
-          <tbody>
-            {filtered.map(r => (
-              <tr key={r.id} className="cursor-pointer hover:bg-black/[.02]"
-                  onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}>
-                {cols.map(c => {
-                  const editable = perms?.canEdit(objectTypeId) && perms?.fieldEditable(c.id)
-                  if (editable && c.is_status_field) {
-                    return <td key={c.id} className="td">
-                      <StatusCell field={c} value={r.data[c.key]} onSave={v => saveField(r, c, v)} />
-                    </td>
-                  }
-                  if (editable && c.key === 'notes') {
-                    return <td key={c.id} className="td">
-                      <NotesCell field={c} value={r.data[c.key]} onSave={v => saveField(r, c, v)} />
-                    </td>
-                  }
-                  return <td key={c.id} className="td"><FieldValue field={c} value={r.data[c.key]} /></td>
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {filtered.length === 0 && <p className="p-8 text-center text-sm text-muted">No records yet. Create one or import from Excel.</p>}
-      </div>
+      {view === 'kanban' ? (
+        statusField ? (
+          <KanbanBoard columns={kanbanColumns} cols={cols} objectTypeId={objectTypeId} nav={nav} />
+        ) : (
+          <div className="card p-8 text-center text-sm text-muted">
+            No status field is set for {ot.name}. Mark one as the status field in Record types to use Kanban view.
+          </div>
+        )
+      ) : (
+        <>
+          {/* Desktop table */}
+          <div className="card hidden overflow-x-auto sm:block">
+            <table className="w-full min-w-[640px]">
+              <thead><tr>{cols.map(c => <th key={c.id} className="th">{c.label}</th>)}</tr></thead>
+              <tbody>
+                {filtered.map(r => (
+                  <tr key={r.id} className="cursor-pointer hover:bg-black/[.02]"
+                      onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}>
+                    {cols.map(c => {
+                      const editable = perms?.canEdit(objectTypeId) && perms?.fieldEditable(c.id)
+                      if (editable && c.is_status_field) {
+                        return <td key={c.id} className="td">
+                          <StatusCell field={c} value={r.data[c.key]} onSave={v => saveField(r, c, v)} />
+                        </td>
+                      }
+                      if (editable && c.key === 'notes') {
+                        return <td key={c.id} className="td">
+                          <NotesCell field={c} value={r.data[c.key]} onSave={v => saveField(r, c, v)} />
+                        </td>
+                      }
+                      if (editable && c.key === 'callback_date_time') {
+                        return <td key={c.id} className="td">
+                          <DateTimeCell value={r.data[c.key]} onSave={v => saveField(r, c, v)} />
+                        </td>
+                      }
+                      return <td key={c.id} className="td"><FieldValue field={c} value={r.data[c.key]} /></td>
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {filtered.length === 0 && <p className="p-8 text-center text-sm text-muted">No records yet. Create one or import from Excel.</p>}
+          </div>
 
-      {/* Mobile cards */}
-      <div className="space-y-3 sm:hidden">
-        {filtered.map(r => (
-          <button key={r.id} className="card w-full p-4 text-left" onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}>
-            {cols.slice(0, 4).map(c => (
-              <div key={c.id} className="flex justify-between gap-3 py-0.5 text-sm">
-                <span className="text-muted">{c.label}</span>
-                <span className="text-right"><FieldValue field={c} value={r.data[c.key]} /></span>
-              </div>
+          {/* Mobile cards */}
+          <div className="space-y-3 sm:hidden">
+            {filtered.map(r => (
+              <button key={r.id} className="card w-full p-4 text-left" onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}>
+                {cols.slice(0, 4).map(c => (
+                  <div key={c.id} className="flex justify-between gap-3 py-0.5 text-sm">
+                    <span className="text-muted">{c.label}</span>
+                    <span className="text-right"><FieldValue field={c} value={r.data[c.key]} /></span>
+                  </div>
+                ))}
+              </button>
             ))}
-          </button>
-        ))}
-        {filtered.length === 0 && <p className="py-8 text-center text-sm text-muted">No records yet.</p>}
-      </div>
+            {filtered.length === 0 && <p className="py-8 text-center text-sm text-muted">No records yet.</p>}
+          </div>
+        </>
+      )}
 
       {deleteAll &&
         <DeleteAllModal objectTypeId={objectTypeId} typeName={ot.name}
@@ -215,6 +246,56 @@ function NotesCell({ field, value, onSave }) {
         onChange={e => setText(e.target.value)} onBlur={commit}
         onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur() } }} />
       {saved && <Check size={14} className="shrink-0 text-ok" />}
+    </div>
+  )
+}
+
+function DateTimeCell({ value, onSave }) {
+  const [val, setVal] = useState(value ?? '')
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => { setVal(value ?? '') }, [value])
+
+  const commit = async () => {
+    if (val === (value ?? '')) return
+    const ok = await onSave(val)
+    if (ok) { setSaved(true); setTimeout(() => setSaved(false), 1500) }
+  }
+
+  return (
+    <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+      <input type="datetime-local" className="input !h-8 !py-1 text-sm" value={val}
+        onChange={e => setVal(e.target.value)} onBlur={commit} />
+      {saved && <Check size={14} className="shrink-0 text-ok" />}
+    </div>
+  )
+}
+
+function KanbanBoard({ columns, cols, objectTypeId, nav }) {
+  return (
+    <div className="flex gap-4 overflow-x-auto pb-2">
+      {columns.map(col => (
+        <div key={col.key} className="w-72 shrink-0">
+          <div className="mb-2 flex items-center gap-2 px-1">
+            <h3 className="text-sm font-semibold">{col.label}</h3>
+            <span className="chip bg-brand-soft text-brand-dark">{col.records.length}</span>
+          </div>
+          <div className="space-y-2">
+            {col.records.map(r => (
+              <button key={r.id} className="card w-full p-3 text-left transition-shadow hover:shadow-pop"
+                onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}>
+                {cols.map(c => (
+                  <div key={c.id} className="flex justify-between gap-3 py-0.5 text-xs">
+                    <span className="text-muted">{c.label}</span>
+                    <span className="text-right"><FieldValue field={c} value={r.data[c.key]} /></span>
+                  </div>
+                ))}
+              </button>
+            ))}
+            {col.records.length === 0 && <p className="px-1 py-6 text-center text-xs text-muted">No records</p>}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
