@@ -103,7 +103,7 @@ export default function RecordList() {
 
       {view === 'kanban' ? (
         statusField ? (
-          <KanbanBoard columns={kanbanColumns} cols={cols} objectTypeId={objectTypeId} nav={nav} />
+          <KanbanBoard columns={kanbanColumns} cols={cols.slice(0, 3)} objectTypeId={objectTypeId} nav={nav} />
         ) : (
           <div className="card p-8 text-center text-sm text-muted">
             No status field is set for {ot.name}. Mark one as the status field in Record types to use Kanban view.
