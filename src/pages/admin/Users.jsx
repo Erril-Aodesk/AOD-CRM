@@ -67,13 +67,30 @@ function InviteModal({ roles, orgId, invitedBy, onClose }) {
   const [roleId, setRoleId] = useState(roles.find(r => !r.is_admin)?.id || roles[0]?.id || '')
   const [link, setLink] = useState('')
   const [copied, setCopied] = useState(false)
+  const [emailSent, setEmailSent] = useState(false)
+  const [sending, setSending] = useState(false)
 
   const create = async () => {
     const { data, error } = await supabase.from('invitations')
       .insert({ org_id: orgId, email, role_id: roleId, invited_by: invitedBy })
       .select().single()
     if (error) return alert(error.message)
-    setLink(`${window.location.origin}/accept-invite?token=${data.token}`)
+    const inviteLink = `${window.location.origin}/accept-invite?token=${data.token}`
+    setLink(inviteLink)
+
+    setSending(true)
+    try {
+      const res = await fetch('/api/send-invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, link: inviteLink })
+      })
+      setEmailSent(res.ok)
+    } catch {
+      setEmailSent(false)
+    } finally {
+      setSending(false)
+    }
   }
   const copy = () => { navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1500) }
 
@@ -85,7 +102,13 @@ function InviteModal({ roles, orgId, invitedBy, onClose }) {
             <button className="btn-primary" disabled={!email} onClick={create}>Create invite</button></>}>
       {link ? (
         <div className="space-y-3">
-          <p className="text-sm text-muted">Share this link with {email}. It expires in 7 days.</p>
+          {sending ? (
+            <p className="text-sm text-muted">Sending invite email to {email}…</p>
+          ) : emailSent ? (
+            <p className="text-sm text-muted">Invite email sent to {email}. You can also share the link below.</p>
+          ) : (
+            <p className="text-sm text-warn">Couldn't send the invite email — share this link with {email} instead.</p>
+          )}
           <div className="flex gap-2">
             <input className="input" readOnly value={link} />
             <button className="btn-outline shrink-0" onClick={copy}>{copied ? <Check size={16} /> : <Copy size={16} />}</button>
