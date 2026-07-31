@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { FieldValue } from '../components/DynamicField'
 import Spinner from '../components/Spinner'
 import Modal from '../components/Modal'
-import { Plus, Search, Trash2 } from 'lucide-react'
+import { Plus, Search, Trash2, Check } from 'lucide-react'
 
 export default function RecordList() {
   const { objectTypeId } = useParams()
@@ -18,8 +18,8 @@ export default function RecordList() {
 
   const ot = objectTypes.find(o => o.id === objectTypeId)
   const cols = useMemo(() =>
-    fields.filter(f => f.object_type_id === objectTypeId && perms?.fieldVisible(f.id))
-          .sort((a, b) => a.sort_order - b.sort_order).slice(0, 6),
+    fields.filter(f => f.object_type_id === objectTypeId && f.show_in_list !== false && perms?.fieldVisible(f.id))
+          .sort((a, b) => a.sort_order - b.sort_order),
     [fields, objectTypeId, perms])
 
   const loadRows = () =>
@@ -42,6 +42,14 @@ export default function RecordList() {
     setDeleteAll(false)
     setToast(`Deleted ${count} record${count === 1 ? '' : 's'}`)
     loadRows()
+  }
+
+  const saveField = async (record, field, value) => {
+    const newData = { ...record.data, [field.key]: value }
+    const { error } = await supabase.from('records').update({ data: newData }).eq('id', record.id)
+    if (error) { alert(error.message); return false }
+    setRows(rs => rs.map(r => r.id === record.id ? { ...r, data: newData } : r))
+    return true
   }
 
   const create = async () => {
@@ -87,7 +95,20 @@ export default function RecordList() {
             {filtered.map(r => (
               <tr key={r.id} className="cursor-pointer hover:bg-black/[.02]"
                   onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}>
-                {cols.map(c => <td key={c.id} className="td"><FieldValue field={c} value={r.data[c.key]} /></td>)}
+                {cols.map(c => {
+                  const editable = perms?.canEdit(objectTypeId) && perms?.fieldEditable(c.id)
+                  if (editable && c.is_status_field) {
+                    return <td key={c.id} className="td">
+                      <StatusCell field={c} value={r.data[c.key]} onSave={v => saveField(r, c, v)} />
+                    </td>
+                  }
+                  if (editable && c.key === 'notes') {
+                    return <td key={c.id} className="td">
+                      <NotesCell field={c} value={r.data[c.key]} onSave={v => saveField(r, c, v)} />
+                    </td>
+                  }
+                  return <td key={c.id} className="td"><FieldValue field={c} value={r.data[c.key]} /></td>
+                })}
               </tr>
             ))}
           </tbody>
@@ -154,5 +175,46 @@ function DeleteAllModal({ objectTypeId, typeName, onClose, onDeleted }) {
         </div>
       </div>
     </Modal>
+  )
+}
+
+function StatusCell({ field, value, onSave }) {
+  const [saved, setSaved] = useState(false)
+
+  const change = async (e) => {
+    const ok = await onSave(e.target.value)
+    if (ok) { setSaved(true); setTimeout(() => setSaved(false), 1500) }
+  }
+
+  return (
+    <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+      <select className="input !h-8 !py-1 text-sm" value={value ?? ''} onChange={change}>
+        <option value="">—</option>
+        {(field.options || []).map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+      {saved && <Check size={14} className="shrink-0 text-ok" />}
+    </div>
+  )
+}
+
+function NotesCell({ field, value, onSave }) {
+  const [text, setText] = useState(value ?? '')
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => { setText(value ?? '') }, [value])
+
+  const commit = async () => {
+    if (text === (value ?? '')) return
+    const ok = await onSave(text)
+    if (ok) { setSaved(true); setTimeout(() => setSaved(false), 1500) }
+  }
+
+  return (
+    <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+      <input className="input !h-8 !py-1 text-sm" value={text}
+        onChange={e => setText(e.target.value)} onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur() } }} />
+      {saved && <Check size={14} className="shrink-0 text-ok" />}
+    </div>
   )
 }

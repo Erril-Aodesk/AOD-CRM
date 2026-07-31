@@ -121,11 +121,12 @@ function FieldModal({ field, object_type_id, count, orgId, onClose, onSaved }) {
   const [type, setType] = useState(field?.field_type || 'text')
   const [required, setRequired] = useState(field?.is_required || false)
   const [options, setOptions] = useState((field?.options || []).join(', '))
+  const [showInList, setShowInList] = useState(field?.show_in_list ?? true)
   const needsOptions = type === 'select' || type === 'multiselect'
 
   const save = async () => {
     const payload = {
-      label, field_type: type, is_required: required,
+      label, field_type: type, is_required: required, show_in_list: showInList,
       options: needsOptions ? options.split(',').map(s => s.trim()).filter(Boolean) : null
     }
     const { error } = isEdit
@@ -159,6 +160,10 @@ function FieldModal({ field, object_type_id, count, orgId, onClose, onSaved }) {
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" className="h-4 w-4 accent-brand" checked={required} onChange={e => setRequired(e.target.checked)} />
           Required
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" className="h-4 w-4 accent-brand" checked={showInList} onChange={e => setShowInList(e.target.checked)} />
+          Show in list
         </label>
       </div>
     </Modal>
