@@ -23,6 +23,17 @@ export default function RecordList() {
           .sort((a, b) => a.sort_order - b.sort_order),
     [fields, objectTypeId, perms])
   const statusField = fields.find(f => f.object_type_id === objectTypeId && f.is_status_field)
+  const callbackField = fields.find(f => f.object_type_id === objectTypeId && f.key === 'callback_date_time')
+  const isRecordToday = (r) => {
+    if (!callbackField) return false
+    const raw = r.data[callbackField.key]
+    if (!raw) return false
+    const d = new Date(raw)
+    if (isNaN(d)) return false
+    const now = new Date()
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
+  }
+  const byPriority = (a, b) => (isRecordToday(b) ? 1 : 0) - (isRecordToday(a) ? 1 : 0)
 
   const loadRows = () =>
     supabase.from('records').select('*').eq('object_type_id', objectTypeId)
@@ -72,8 +83,8 @@ export default function RecordList() {
 
   const statusOptions = statusField?.options || []
   const kanbanColumns = statusField
-    ? [...statusOptions.map(o => ({ key: o, label: o, records: filtered.filter(r => r.data[statusField.key] === o) })),
-       { key: '__none', label: '—', records: filtered.filter(r => !statusOptions.includes(r.data[statusField.key])) }]
+    ? [...statusOptions.map(o => ({ key: o, label: o, records: filtered.filter(r => r.data[statusField.key] === o).sort(byPriority) })),
+       { key: '__none', label: '—', records: filtered.filter(r => !statusOptions.includes(r.data[statusField.key])).sort(byPriority) }]
     : null
 
   return (
@@ -103,7 +114,7 @@ export default function RecordList() {
 
       {view === 'kanban' ? (
         statusField ? (
-          <KanbanBoard columns={kanbanColumns} cols={cols.slice(0, 3)} objectTypeId={objectTypeId} nav={nav} />
+          <KanbanBoard columns={kanbanColumns} cols={cols.slice(0, 3)} objectTypeId={objectTypeId} nav={nav} isToday={isRecordToday} />
         ) : (
           <div className="card p-8 text-center text-sm text-muted">
             No status field is set for {ot.name}. Mark one as the status field in Record types to use Kanban view.
@@ -271,7 +282,7 @@ function DateTimeCell({ value, onSave }) {
   )
 }
 
-function KanbanBoard({ columns, cols, objectTypeId, nav }) {
+function KanbanBoard({ columns, cols, objectTypeId, nav, isToday }) {
   return (
     <div className="flex gap-4 overflow-x-auto pb-2">
       {columns.map(col => (
@@ -281,17 +292,22 @@ function KanbanBoard({ columns, cols, objectTypeId, nav }) {
             <span className="chip bg-brand-soft text-brand-dark">{col.records.length}</span>
           </div>
           <div className="space-y-2">
-            {col.records.map(r => (
-              <button key={r.id} className="card w-full p-3 text-left transition-shadow hover:shadow-pop"
-                onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}>
-                {cols.map(c => (
-                  <div key={c.id} className="flex justify-between gap-3 py-0.5 text-xs">
-                    <span className="text-muted">{c.label}</span>
-                    <span className="text-right"><FieldValue field={c} value={r.data[c.key]} /></span>
-                  </div>
-                ))}
-              </button>
-            ))}
+            {col.records.map(r => {
+              const today = isToday(r)
+              return (
+                <button key={r.id}
+                  className={`card w-full p-3 text-left transition-shadow hover:shadow-pop ${today ? 'border-warn ring-1 ring-warn/40' : ''}`}
+                  onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}>
+                  {today && <span className="mb-1.5 inline-block rounded-full bg-warn px-2 py-0.5 text-[10px] font-semibold text-white">Today</span>}
+                  {cols.map(c => (
+                    <div key={c.id} className="flex justify-between gap-3 py-0.5 text-xs">
+                      <span className="text-muted">{c.label}</span>
+                      <span className="text-right"><FieldValue field={c} value={r.data[c.key]} /></span>
+                    </div>
+                  ))}
+                </button>
+              )
+            })}
             {col.records.length === 0 && <p className="px-1 py-6 text-center text-xs text-muted">No records</p>}
           </div>
         </div>

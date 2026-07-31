@@ -1,5 +1,5 @@
 // Vercel Cron endpoint — runs on the schedule in vercel.json.
-// Calls the Postgres function escalate_overdue_callbacks() with the service role.
+// Calls the Postgres function daily_agent_run() with the service role.
 import { createClient } from '@supabase/supabase-js'
 
 export default async function handler(req, res) {
@@ -16,7 +16,7 @@ export default async function handler(req, res) {
     process.env.SUPABASE_SERVICE_ROLE_KEY
   )
 
-  const { data, error } = await supabase.rpc('escalate_overdue_callbacks')
+  const { data, error } = await supabase.rpc('daily_agent_run')
   if (error) return res.status(500).json({ error: error.message })
   return res.status(200).json({ escalated: data })
 }
