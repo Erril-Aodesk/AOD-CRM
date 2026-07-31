@@ -4,7 +4,8 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { FieldValue } from '../components/DynamicField'
 import Spinner from '../components/Spinner'
-import { Plus, Search } from 'lucide-react'
+import Modal from '../components/Modal'
+import { Plus, Search, Trash2 } from 'lucide-react'
 
 export default function RecordList() {
   const { objectTypeId } = useParams()
@@ -12,6 +13,8 @@ export default function RecordList() {
   const nav = useNavigate()
   const [rows, setRows] = useState(null)
   const [q, setQ] = useState('')
+  const [deleteAll, setDeleteAll] = useState(false)
+  const [toast, setToast] = useState('')
 
   const ot = objectTypes.find(o => o.id === objectTypeId)
   const cols = useMemo(() =>
@@ -19,12 +22,27 @@ export default function RecordList() {
           .sort((a, b) => a.sort_order - b.sort_order).slice(0, 6),
     [fields, objectTypeId, perms])
 
-  useEffect(() => {
-    setRows(null)
+  const loadRows = () =>
     supabase.from('records').select('*').eq('object_type_id', objectTypeId)
       .order('created_at', { ascending: false })
       .then(({ data }) => setRows(data || []))
+
+  useEffect(() => {
+    setRows(null)
+    loadRows()
   }, [objectTypeId])
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(''), 4000)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  const handleDeletedAll = (count) => {
+    setDeleteAll(false)
+    setToast(`Deleted ${count} record${count === 1 ? '' : 's'}`)
+    loadRows()
+  }
 
   const create = async () => {
     const { data, error } = await supabase.from('records')
@@ -54,6 +72,10 @@ export default function RecordList() {
           </div>
           {perms?.canCreate(objectTypeId) &&
             <button className="btn-primary" onClick={create}><Plus size={16} /> New</button>}
+          {perms?.isAdmin &&
+            <button className="btn-ghost text-danger" onClick={() => setDeleteAll(true)}>
+              <Trash2 size={16} /> Delete all
+            </button>}
         </div>
       </div>
 
@@ -87,6 +109,50 @@ export default function RecordList() {
         ))}
         {filtered.length === 0 && <p className="py-8 text-center text-sm text-muted">No records yet.</p>}
       </div>
+
+      {deleteAll &&
+        <DeleteAllModal objectTypeId={objectTypeId} typeName={ot.name}
+          onClose={() => setDeleteAll(false)} onDeleted={handleDeletedAll} />}
+
+      {toast &&
+        <div className="fixed bottom-4 right-4 z-50 rounded-lg bg-ok px-4 py-2.5 text-sm font-medium text-white shadow-pop">
+          {toast}
+        </div>}
     </div>
+  )
+}
+
+function DeleteAllModal({ objectTypeId, typeName, onClose, onDeleted }) {
+  const [confirmText, setConfirmText] = useState('')
+  const [deleting, setDeleting] = useState(false)
+
+  const remove = async () => {
+    setDeleting(true)
+    const { error, count } = await supabase.from('records')
+      .delete({ count: 'exact' }).eq('object_type_id', objectTypeId)
+    setDeleting(false)
+    if (error) return alert(error.message)
+    onDeleted(count ?? 0)
+  }
+
+  return (
+    <Modal title={`Delete all "${typeName}" records`} onClose={onClose}
+      footer={<>
+        <button className="btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="btn-danger" disabled={confirmText !== typeName || deleting} onClick={remove}>
+          {deleting ? 'Deleting…' : 'Delete all'}
+        </button>
+      </>}>
+      <div className="space-y-3">
+        <p className="text-sm text-muted">
+          This permanently deletes every record of type <strong>{typeName}</strong>. This cannot be undone.
+        </p>
+        <div>
+          <label className="label">Type "{typeName}" to confirm</label>
+          <input className="input" value={confirmText} onChange={e => setConfirmText(e.target.value)}
+            placeholder={typeName} />
+        </div>
+      </div>
+    </Modal>
   )
 }
