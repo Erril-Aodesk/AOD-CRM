@@ -9,7 +9,7 @@ export default async function handler(req, res) {
   const resend = new Resend(process.env.RESEND_API_KEY)
 
   const { error } = await resend.emails.send({
-    from: 'onboarding@resend.dev',
+    from: 'AODesk CRM <invites@aodesk.com.au>',
     to: email,
     subject: "You've been invited",
     html: `
