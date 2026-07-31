@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { Database, PhoneCall } from 'lucide-react'
 
 export default function Dashboard() {
-  const { profile, objectTypes, perms } = useAuth()
+  const { profile, objectTypes, fields, perms } = useAuth()
   const [counts, setCounts] = useState({})
   const [dueCount, setDueCount] = useState(0)
   const visible = objectTypes.filter(ot => perms?.canView(ot.id))
@@ -19,12 +19,27 @@ export default function Dashboard() {
         c[ot.id] = count || 0
       }
       setCounts(c)
-      const { count } = await supabase.from('callbacks')
-        .select('id', { count: 'exact', head: true })
-        .eq('is_completed', false).lte('callback_at', new Date().toISOString())
-      setDueCount(count || 0)
+
+      const now = new Date()
+      const isDueOrOverdue = (raw) => {
+        if (!raw) return false
+        const dt = new Date(raw)
+        if (isNaN(dt)) return false
+        return dt < now ||
+          (dt.getFullYear() === now.getFullYear() && dt.getMonth() === now.getMonth() && dt.getDate() === now.getDate())
+      }
+      const callbackTypes = visible.filter(ot => fields.some(f => f.object_type_id === ot.id && f.key === 'callback_date_time'))
+      const results = await Promise.all(callbackTypes.map(ot =>
+        supabase.from('records')
+          .select('callback_date_time:data->>callback_date_time')
+          .eq('object_type_id', ot.id)
+          .not('data->>callback_date_time', 'is', null)
+      ))
+      const due = results.reduce((n, { data }) =>
+        n + (data || []).filter(r => isDueOrOverdue(r.callback_date_time)).length, 0)
+      setDueCount(due)
     })()
-  }, [objectTypes.length])
+  }, [objectTypes.length, fields.length])
 
   return (
     <div>
