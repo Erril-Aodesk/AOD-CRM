@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { aggregateFieldCounts } from '../lib/reportAggregates'
-import { Database, PhoneCall, Tag } from 'lucide-react'
+import { Database, PhoneCall, Tag, CalendarCheck } from 'lucide-react'
 
 // "Unset" is a synthetic bucket for missing values, not a real status option —
 // there's no dropdown value to filter by, so those tiles link unfiltered.
@@ -23,6 +23,7 @@ export default function Dashboard() {
   const [counts, setCounts] = useState({})
   const [dueCount, setDueCount] = useState(0)
   const [statusSections, setStatusSections] = useState([])
+  const [appointmentCount, setAppointmentCount] = useState(0)
   const visible = objectTypes.filter(ot => perms?.canView(ot.id))
 
   useEffect(() => {
@@ -69,8 +70,14 @@ export default function Dashboard() {
         return { ot, large, small }
       }))
       setStatusSections(sections.filter(s => s.large.length > 0 || s.small.length > 0))
+
+      if (profile?.org_id) {
+        const { count } = await supabase.from('appointments')
+          .select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id)
+        setAppointmentCount(count || 0)
+      }
     })()
-  }, [objectTypes.length, fields.length])
+  }, [objectTypes.length, fields.length, profile?.org_id])
 
   return (
     <div>
@@ -134,6 +141,18 @@ export default function Dashboard() {
           )}
         </div>
       ))}
+
+      <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Link to="/appointments" className="card p-5 hover:shadow-pop transition-shadow">
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-lg bg-brand-soft text-brand"><CalendarCheck size={20} /></div>
+            <div>
+              <p className="text-2xl font-semibold">{appointmentCount}</p>
+              <p className="text-sm text-muted">Appointments</p>
+            </div>
+          </div>
+        </Link>
+      </div>
     </div>
   )
 }

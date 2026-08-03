@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { FieldValue, FieldInput, PhoneCopyButton, coerceDefaultValue } from '../components/DynamicField'
 import Spinner from '../components/Spinner'
 import Modal from '../components/Modal'
+import AppointmentModal from '../components/AppointmentModal'
 import { Plus, Search, Trash2, Check, List, LayoutGrid, ChevronLeft, ChevronRight } from 'lucide-react'
 
 const MIN_COL_WIDTH = 90
@@ -28,6 +29,7 @@ export default function RecordList() {
   const [listRows, setListRows] = useState(null)
   const [listCount, setListCount] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
+  const [appointmentRecord, setAppointmentRecord] = useState(null)
 
   const ot = objectTypes.find(o => o.id === objectTypeId)
   const cols = useMemo(() =>
@@ -40,6 +42,9 @@ export default function RecordList() {
     [fields, objectTypeId, perms])
   const statusField = fields.find(f => f.object_type_id === objectTypeId && f.is_status_field)
   const callbackField = fields.find(f => f.object_type_id === objectTypeId && f.key === 'callback_date_time')
+  // Full field set (not just show_in_list columns) — AppointmentModal needs to
+  // find fields like position/address/company that may not be list columns.
+  const allFieldDefs = fields.filter(f => f.object_type_id === objectTypeId && perms?.fieldVisible(f.id))
   const filterableFields = fields.filter(f =>
     f.object_type_id === objectTypeId && perms?.fieldVisible(f.id) &&
     (f.field_type === 'select' || f.is_status_field || f.key?.toLowerCase() === 'industry' || f.label?.toLowerCase() === 'industry')
@@ -287,7 +292,8 @@ export default function RecordList() {
                       const editable = perms?.canEdit(objectTypeId) && perms?.fieldEditable(c.id)
                       if (editable && c.is_status_field) {
                         return <td key={c.id} className="td">
-                          <StatusCell field={c} value={r.data[c.key]} onSave={v => saveField(r, c, v)} />
+                          <StatusCell field={c} value={r.data[c.key]} onSave={v => saveField(r, c, v)}
+                            onAppointment={() => setAppointmentRecord(r)} />
                         </td>
                       }
                       if (editable && c.key === 'notes') {
@@ -355,6 +361,11 @@ export default function RecordList() {
       {deleteAll &&
         <DeleteAllModal objectTypeId={objectTypeId} typeName={ot.name}
           onClose={() => setDeleteAll(false)} onDeleted={handleDeletedAll} />}
+
+      {appointmentRecord &&
+        <AppointmentModal record={appointmentRecord} ot={ot} defs={allFieldDefs}
+          onClose={() => setAppointmentRecord(null)}
+          onBooked={() => { setAppointmentRecord(null); setToast('Appointment booked and sent to manager') }} />}
 
       {toast &&
         <div className="fixed bottom-4 right-4 z-50 rounded-lg bg-ok px-4 py-2.5 text-sm font-medium text-white shadow-pop">
@@ -470,12 +481,16 @@ function DeleteAllModal({ objectTypeId, typeName, onClose, onDeleted }) {
   )
 }
 
-function StatusCell({ field, value, onSave }) {
+function StatusCell({ field, value, onSave, onAppointment }) {
   const [saved, setSaved] = useState(false)
 
   const change = async (e) => {
-    const ok = await onSave(e.target.value)
-    if (ok) { setSaved(true); setTimeout(() => setSaved(false), 1500) }
+    const newValue = e.target.value
+    const ok = await onSave(newValue)
+    if (ok) {
+      setSaved(true); setTimeout(() => setSaved(false), 1500)
+      if (newValue === 'Appointment') onAppointment?.()
+    }
   }
 
   return (

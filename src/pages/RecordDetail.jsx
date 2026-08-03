@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { FieldInput, PhoneCopyButton } from '../components/DynamicField'
+import AppointmentModal from '../components/AppointmentModal'
 import Spinner from '../components/Spinner'
 import { Trash2, ArrowLeft, Save } from 'lucide-react'
 
@@ -21,6 +22,7 @@ export default function RecordDetail() {
   const canEdit = perms?.canEdit(objectTypeId)
   const canAssign = perms?.isManager
   const [users, setUsers] = useState([])
+  const [appointmentOpen, setAppointmentOpen] = useState(false)
 
   useEffect(() => {
     supabase.from('records').select('*').eq('id', recordId).single()
@@ -39,6 +41,11 @@ export default function RecordDetail() {
   const assignableUsers = users.filter(u => u.is_active && u.roles?.slug === 'agent')
   const currentOwnerIfNotAssignable = rec && rec.owner_id && !assignableUsers.some(u => u.id === rec.owner_id)
     ? users.find(u => u.id === rec.owner_id) : null
+
+  const onFieldChange = (f, v) => {
+    setData(d => ({ ...d, [f.key]: v }))
+    if (f.is_status_field && v === 'Appointment') setAppointmentOpen(true)
+  }
 
   const changeOwner = async (id) => {
     const { error } = await supabase.from('records').update({ owner_id: id || null }).eq('id', recordId)
@@ -104,12 +111,12 @@ export default function RecordDetail() {
                 {f.field_type === 'phone' ? (
                   <div className="flex items-center gap-2">
                     <FieldInput field={f} value={data[f.key]} disabled={!editable}
-                      onChange={v => setData(d => ({ ...d, [f.key]: v }))} />
+                      onChange={v => onFieldChange(f, v)} />
                     <PhoneCopyButton value={data[f.key]} />
                   </div>
                 ) : (
                   <FieldInput field={f} value={data[f.key]} disabled={!editable}
-                    onChange={v => setData(d => ({ ...d, [f.key]: v }))} />
+                    onChange={v => onFieldChange(f, v)} />
                 )}
               </div>
             )
@@ -125,6 +132,11 @@ export default function RecordDetail() {
           </div>
         )}
       </div>
+
+      {appointmentOpen &&
+        <AppointmentModal record={{ ...rec, data }} ot={ot} defs={defs}
+          onClose={() => setAppointmentOpen(false)}
+          onBooked={() => setAppointmentOpen(false)} />}
     </div>
   )
 }

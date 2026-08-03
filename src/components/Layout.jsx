@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import NotificationBell from './NotificationBell'
 import { LayoutGrid, PhoneCall, Upload, Settings, Users, Database,
-         Shield, LogOut, Menu, X, BarChart3 } from 'lucide-react'
+         Shield, LogOut, Menu, X, BarChart3, CalendarCheck } from 'lucide-react'
 
 export default function Layout() {
   const { profile, role, perms, objectTypes, signOut } = useAuth()
@@ -30,6 +30,7 @@ export default function Layout() {
         <Item to="/" icon={LayoutGrid} end>Dashboard</Item>
         <Item to="/callbacks" icon={PhoneCall}>Callbacks</Item>
         {perms?.isManager && <Item to="/reports" icon={BarChart3}>Reports</Item>}
+        {perms?.isManager && <Item to="/appointments" icon={CalendarCheck}>Appointments</Item>}
         {visibleTypes.length > 0 && (
           <p className="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Records</p>
         )}
