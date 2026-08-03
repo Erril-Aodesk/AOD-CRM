@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { FieldValue, FieldInput, PhoneCopyButton } from '../components/DynamicField'
+import { FieldValue, FieldInput, PhoneCopyButton, coerceDefaultValue } from '../components/DynamicField'
 import Spinner from '../components/Spinner'
 import Modal from '../components/Modal'
 import { Plus, Search, Trash2, Check, List, LayoutGrid } from 'lucide-react'
@@ -222,12 +222,20 @@ export default function RecordList() {
 const isEmptyValue = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)
 
 function NewRecordModal({ ot, fields, perms, profile, onClose, onCreated }) {
-  const [data, setData] = useState({})
+  const defs = fields.filter(f => f.object_type_id === ot.id && perms?.fieldVisible(f.id))
+    .sort((a, b) => a.sort_order - b.sort_order)
+
+  const [data, setData] = useState(() => {
+    const initial = {}
+    defs.forEach(f => {
+      const dv = coerceDefaultValue(f)
+      if (dv !== undefined) initial[f.key] = dv
+    })
+    return initial
+  })
   const [saving, setSaving] = useState(false)
   const [attempted, setAttempted] = useState(false)
 
-  const defs = fields.filter(f => f.object_type_id === ot.id && perms?.fieldVisible(f.id))
-    .sort((a, b) => a.sort_order - b.sort_order)
   const missing = defs.filter(f => f.is_required && isEmptyValue(data[f.key]))
 
   const save = async () => {

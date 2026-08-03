@@ -2,6 +2,7 @@ import { useState } from 'react'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { coerceDefaultValue } from '../components/DynamicField'
 import { Upload, CheckCircle2 } from 'lucide-react'
 
 export default function ImportExcel() {
@@ -41,11 +42,16 @@ export default function ImportExcel() {
       const data = {}
       defs.forEach(f => {
         const h = map[f.key]
-        if (!h) return
-        let val = row[h]
-        if (f.field_type === 'number' || f.field_type === 'currency') val = val === '' ? null : Number(val)
-        if (f.field_type === 'boolean') val = ['true','yes','1','y'].includes(String(val).toLowerCase())
-        data[f.key] = val
+        let val = h ? row[h] : undefined
+        if (h) {
+          if (f.field_type === 'number' || f.field_type === 'currency') val = val === '' ? '' : Number(val)
+          if (f.field_type === 'boolean') val = ['true','yes','1','y'].includes(String(val).toLowerCase())
+        }
+        if (val === undefined || val === '') {
+          const dv = coerceDefaultValue(f)
+          if (dv !== undefined) val = dv
+        }
+        if (val !== undefined && val !== '') data[f.key] = val
       })
       return { org_id: ot.org_id, object_type_id: otId, owner_id: ot.default_agent_id || profile.id, created_by: profile.id, data }
     })

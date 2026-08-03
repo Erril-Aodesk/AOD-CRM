@@ -36,6 +36,23 @@ export function PhoneCopyButton({ value }) {
   )
 }
 
+// Coerces a field's default_value (always stored as text) into the shape its field_type expects.
+export function coerceDefaultValue(field) {
+  const dv = field.default_value
+  if (dv === null || dv === undefined || dv === '') return undefined
+  switch (field.field_type) {
+    case 'number':
+    case 'currency':
+      return Number(dv)
+    case 'boolean':
+      return ['true', 'yes', '1', 'y'].includes(String(dv).toLowerCase())
+    case 'multiselect':
+      return [dv]
+    default:
+      return dv
+  }
+}
+
 export function FieldInput({ field, value, onChange, disabled }) {
   const v = value ?? ''
   const common = 'input'

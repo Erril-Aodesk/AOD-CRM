@@ -214,12 +214,15 @@ function FieldModal({ field, object_type_id, count, orgId, onClose, onSaved }) {
   const [required, setRequired] = useState(field?.is_required || false)
   const [options, setOptions] = useState((field?.options || []).join(', '))
   const [showInList, setShowInList] = useState(field?.show_in_list ?? true)
+  const [defaultValue, setDefaultValue] = useState(field?.default_value || '')
   const needsOptions = type === 'select' || type === 'multiselect'
+  const optionList = options.split(',').map(s => s.trim()).filter(Boolean)
 
   const save = async () => {
     const payload = {
       label, field_type: type, is_required: required, show_in_list: showInList,
-      options: needsOptions ? options.split(',').map(s => s.trim()).filter(Boolean) : null
+      default_value: defaultValue || null,
+      options: needsOptions ? optionList : null
     }
     const { error } = isEdit
       ? await supabase.from('field_definitions').update(payload).eq('id', field.id)
@@ -249,6 +252,17 @@ function FieldModal({ field, object_type_id, count, orgId, onClose, onSaved }) {
             <input className="input" value={options} onChange={e => setOptions(e.target.value)}
               placeholder="New, Contacted, Qualified, Won, Lost" /></div>
         )}
+        <div><label className="label">Default value (optional)</label>
+          {needsOptions ? (
+            <select className="input" value={defaultValue} onChange={e => setDefaultValue(e.target.value)}>
+              <option value="">— none —</option>
+              {optionList.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+          ) : (
+            <input className="input" value={defaultValue} onChange={e => setDefaultValue(e.target.value)}
+              placeholder={type === 'boolean' ? 'true or false' : ''} />
+          )}
+        </div>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" className="h-4 w-4 accent-brand" checked={required} onChange={e => setRequired(e.target.checked)} />
           Required
