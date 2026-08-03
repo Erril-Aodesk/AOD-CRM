@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { FieldValue } from '../components/DynamicField'
+import { FieldValue, FieldInput, PhoneCopyButton } from '../components/DynamicField'
 import Spinner from '../components/Spinner'
 import Modal from '../components/Modal'
 import { Plus, Search, Trash2, Check, List, LayoutGrid } from 'lucide-react'
@@ -16,6 +16,7 @@ export default function RecordList() {
   const [deleteAll, setDeleteAll] = useState(false)
   const [toast, setToast] = useState('')
   const [view, setView] = useState('list')
+  const [creating, setCreating] = useState(false)
 
   const ot = objectTypes.find(o => o.id === objectTypeId)
   const cols = useMemo(() =>
@@ -65,15 +66,6 @@ export default function RecordList() {
     return true
   }
 
-  const create = async () => {
-    const { data, error } = await supabase.from('records')
-      .insert({ object_type_id: objectTypeId, data: {},
-                owner_id: ot.default_agent_id || profile.id,
-                org_id: ot.org_id }).select().single()
-    if (!error && data) nav(`/records/${objectTypeId}/${data.id}`)
-    else alert(error?.message)
-  }
-
   if (!ot) return <p className="text-muted">Record type not found or no access.</p>
   if (rows === null) return <Spinner label={`Loading ${ot.name}…`} />
 
@@ -104,7 +96,7 @@ export default function RecordList() {
             <input className="input pl-8 w-44 sm:w-56" placeholder="Search" value={q} onChange={e => setQ(e.target.value)} />
           </div>
           {perms?.canCreate(objectTypeId) &&
-            <button className="btn-primary" onClick={create}><Plus size={16} /> New</button>}
+            <button className="btn-primary" onClick={() => setCreating(true)}><Plus size={16} /> New</button>}
           {perms?.isAdmin &&
             <button className="btn-ghost text-danger" onClick={() => setDeleteAll(true)}>
               <Trash2 size={16} /> Delete all
@@ -175,6 +167,11 @@ export default function RecordList() {
         </>
       )}
 
+      {creating &&
+        <NewRecordModal ot={ot} fields={fields} perms={perms} profile={profile}
+          onClose={() => setCreating(false)}
+          onCreated={rec => nav(`/records/${objectTypeId}/${rec.id}`)} />}
+
       {deleteAll &&
         <DeleteAllModal objectTypeId={objectTypeId} typeName={ot.name}
           onClose={() => setDeleteAll(false)} onDeleted={handleDeletedAll} />}
@@ -184,6 +181,69 @@ export default function RecordList() {
           {toast}
         </div>}
     </div>
+  )
+}
+
+const isEmptyValue = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)
+
+function NewRecordModal({ ot, fields, perms, profile, onClose, onCreated }) {
+  const [data, setData] = useState({})
+  const [saving, setSaving] = useState(false)
+  const [attempted, setAttempted] = useState(false)
+
+  const defs = fields.filter(f => f.object_type_id === ot.id && perms?.fieldVisible(f.id))
+    .sort((a, b) => a.sort_order - b.sort_order)
+  const missing = defs.filter(f => f.is_required && isEmptyValue(data[f.key]))
+
+  const save = async () => {
+    if (missing.length > 0) { setAttempted(true); return }
+    setSaving(true)
+    const { data: rec, error } = await supabase.from('records')
+      .insert({ object_type_id: ot.id, data,
+                owner_id: ot.default_agent_id || profile.id,
+                org_id: ot.org_id }).select().single()
+    setSaving(false)
+    if (error) return alert(error.message)
+    onCreated(rec)
+  }
+
+  return (
+    <Modal title={`New ${ot.name}`} onClose={onClose} wide
+      footer={<>
+        <button className="btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="btn-primary" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save'}</button>
+      </>}>
+      <div className="space-y-3">
+        {attempted && missing.length > 0 && (
+          <p className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">
+            Please fill in: {missing.map(f => f.label).join(', ')}
+          </p>
+        )}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {defs.map(f => {
+            const editable = perms?.fieldEditable(f.id)
+            const isMissing = attempted && f.is_required && isEmptyValue(data[f.key])
+            return (
+              <div key={f.id} className={f.field_type === 'textarea' ? 'sm:col-span-2' : ''}>
+                <label className="label">{f.label}{f.is_required && <span className="text-danger"> *</span>}</label>
+                {f.field_type === 'phone' ? (
+                  <div className="flex items-center gap-2">
+                    <FieldInput field={f} value={data[f.key]} disabled={!editable}
+                      onChange={v => setData(d => ({ ...d, [f.key]: v }))} />
+                    <PhoneCopyButton value={data[f.key]} />
+                  </div>
+                ) : (
+                  <FieldInput field={f} value={data[f.key]} disabled={!editable}
+                    onChange={v => setData(d => ({ ...d, [f.key]: v }))} />
+                )}
+                {isMissing && <p className="mt-1 text-xs text-danger">Required</p>}
+              </div>
+            )
+          })}
+          {defs.length === 0 && <p className="text-sm text-muted sm:col-span-2">No fields defined yet for this record type.</p>}
+        </div>
+      </div>
+    </Modal>
   )
 }
 

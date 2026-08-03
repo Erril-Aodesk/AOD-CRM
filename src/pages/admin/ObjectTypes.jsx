@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import Modal from '../../components/Modal'
-import { Plus, Trash2, Database, Star, Pencil } from 'lucide-react'
+import { Plus, Trash2, Database, Star, Pencil, Copy } from 'lucide-react'
 
 const TYPES = ['text','textarea','number','currency','date','datetime','boolean','select','multiselect','email','phone']
 const slugify = s => s.toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')
@@ -40,6 +40,65 @@ export default function ObjectTypes() {
     await supabase.from('object_types').update({ default_agent_id: agentId || null }).eq('id', sel)
     await refresh()
   }
+  const duplicateType = async (ot) => {
+    if (!confirm(`Duplicate "${ot.name}"? This copies its fields and permissions, not its records.`)) return
+    const name = `${ot.name} (copy)`
+    const { data: newOt, error: e1 } = await supabase.from('object_types')
+      .insert({ org_id: ot.org_id, name, slug: slugify(name), sort_order: objectTypes.length })
+      .select().single()
+    if (e1) return alert(e1.message)
+
+    const { data: defsToCopy, error: e2 } = await supabase.from('field_definitions').select('*').eq('object_type_id', ot.id)
+    if (e2) return alert(e2.message)
+
+    const fieldIdMap = new Map()
+    if (defsToCopy?.length) {
+      const { data: inserted, error: e3 } = await supabase.from('field_definitions').insert(
+        defsToCopy.map(f => ({
+          org_id: f.org_id, object_type_id: newOt.id, key: f.key, label: f.label,
+          field_type: f.field_type, options: f.options, is_required: f.is_required,
+          is_status_field: f.is_status_field, show_in_list: f.show_in_list, sort_order: f.sort_order
+        }))
+      ).select()
+      if (e3) return alert(e3.message)
+      inserted.forEach(nf => {
+        const orig = defsToCopy.find(f => f.key === nf.key)
+        if (orig) fieldIdMap.set(orig.id, nf.id)
+      })
+    }
+
+    const { data: objPerms, error: e4 } = await supabase.from('role_object_permissions').select('*').eq('object_type_id', ot.id)
+    if (e4) return alert(e4.message)
+    if (objPerms?.length) {
+      const { error: e5 } = await supabase.from('role_object_permissions').insert(
+        objPerms.map(p => ({
+          org_id: p.org_id, role_id: p.role_id, object_type_id: newOt.id,
+          can_view: p.can_view, can_create: p.can_create, can_edit: p.can_edit, can_delete: p.can_delete, scope: p.scope
+        }))
+      )
+      if (e5) return alert(e5.message)
+    }
+
+    if (defsToCopy?.length) {
+      const { data: fieldPerms, error: e6 } = await supabase.from('role_field_permissions')
+        .select('*').in('field_definition_id', defsToCopy.map(f => f.id))
+      if (e6) return alert(e6.message)
+      const newFieldPerms = (fieldPerms || [])
+        .filter(p => fieldIdMap.has(p.field_definition_id))
+        .map(p => ({
+          org_id: p.org_id, role_id: p.role_id,
+          field_definition_id: fieldIdMap.get(p.field_definition_id),
+          can_view: p.can_view, can_edit: p.can_edit
+        }))
+      if (newFieldPerms.length) {
+        const { error: e7 } = await supabase.from('role_field_permissions').insert(newFieldPerms)
+        if (e7) return alert(e7.message)
+      }
+    }
+
+    await refresh()
+    setSel(newOt.id)
+  }
   const setStatus = async (f) => {
     // clear existing status field for this type, then set this one
     await supabase.from('field_definitions').update({ is_status_field: false })
@@ -73,6 +132,9 @@ export default function ObjectTypes() {
               <h2 className="font-semibold">{current.name} · fields</h2>
               <button className="btn-outline ml-auto" onClick={() => setFieldModal({ object_type_id: sel })}>
                 <Plus size={15} /> Add field
+              </button>
+              <button className="btn-outline" onClick={() => duplicateType(current)}>
+                <Copy size={15} /> Duplicate
               </button>
               <button className="btn-ghost text-danger" onClick={() => delType(sel)}><Trash2 size={15} /></button>
             </div>
