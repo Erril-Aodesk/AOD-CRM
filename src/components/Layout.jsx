@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import NotificationBell from './NotificationBell'
 import { LayoutGrid, PhoneCall, Upload, Settings, Users, Database,
@@ -8,8 +9,21 @@ import { LayoutGrid, PhoneCall, Upload, Settings, Users, Database,
 export default function Layout() {
   const { profile, role, perms, objectTypes, signOut } = useAuth()
   const [open, setOpen] = useState(false)
+  const [totalLeads, setTotalLeads] = useState(null)
   const nav = useNavigate()
   const visibleTypes = objectTypes.filter(ot => perms?.canView(ot.id))
+
+  useEffect(() => {
+    if (visibleTypes.length === 0) { setTotalLeads(0); return }
+    let cancelled = false
+    Promise.all(visibleTypes.map(ot =>
+      supabase.from('records').select('id', { count: 'exact', head: true }).eq('object_type_id', ot.id)
+    )).then(results => {
+      if (cancelled) return
+      setTotalLeads(results.reduce((n, { count }) => n + (count || 0), 0))
+    })
+    return () => { cancelled = true }
+  }, [visibleTypes.map(ot => ot.id).join(','), profile?.org_id])
 
   const Item = ({ to, icon: Icon, children, end }) => (
     <NavLink to={to} end={end} onClick={() => setOpen(false)}
@@ -80,7 +94,14 @@ export default function Layout() {
             {open ? <X size={20} /> : <Menu size={20} />}
           </button>
           <div className="md:hidden font-display font-semibold">CRM</div>
-          <div className="ml-auto"><NotificationBell /></div>
+          <div className="ml-auto flex items-center gap-3">
+            {totalLeads !== null && (
+              <span className="hidden sm:inline-flex items-center rounded-full bg-black/5 px-2.5 py-1 text-xs font-medium text-muted">
+                {totalLeads.toLocaleString()} leads
+              </span>
+            )}
+            <NotificationBell />
+          </div>
         </header>
         <main className="min-w-0 flex-1 p-4 sm:p-6"><Outlet /></main>
       </div>
