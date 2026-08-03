@@ -37,8 +37,14 @@ export function AuthProvider({ children }) {
       if (data.session) loadContext(data.session.user.id)
       else setLoading(false)
     })
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
       setSession(s)
+      // TOKEN_REFRESHED (and USER_UPDATED) fire silently in the background as the
+      // access token renews — the signed-in user hasn't changed, so don't blank
+      // the whole app to a loading spinner and remount everything. That was wiping
+      // out whatever an agent had open (e.g. a lead's detail view mid-call) every
+      // time the token refreshed. Only a real sign-in/out should reload context.
+      if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') return
       if (s) { setLoading(true); loadContext(s.user.id) }
       else { setProfile(null); setRole(null); setPerms(null) }
     })
