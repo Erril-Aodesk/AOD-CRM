@@ -29,10 +29,16 @@ export default function RecordDetail() {
 
   useEffect(() => {
     if (!ot?.org_id) return
-    supabase.from('profiles').select('id, full_name, email, is_active')
+    supabase.from('profiles').select('id, full_name, email, is_active, roles(slug)')
       .eq('org_id', ot.org_id).order('full_name')
       .then(({ data }) => setUsers(data || []))
   }, [ot?.org_id])
+
+  // Only Agent/Recruiter is assignable — Managers and Super Admins already see
+  // every record regardless of owner, so they're not options here.
+  const assignableUsers = users.filter(u => u.is_active && u.roles?.slug === 'agent')
+  const currentOwnerIfNotAssignable = rec && rec.owner_id && !assignableUsers.some(u => u.id === rec.owner_id)
+    ? users.find(u => u.id === rec.owner_id) : null
 
   const changeOwner = async (id) => {
     const { error } = await supabase.from('records').update({ owner_id: id || null }).eq('id', recordId)
@@ -76,7 +82,11 @@ export default function RecordDetail() {
           {canAssign ? (
             <select className="input max-w-xs" value={rec.owner_id || ''} onChange={e => changeOwner(e.target.value)}>
               <option value="">— Unassigned —</option>
-              {users.filter(u => u.is_active).map(u => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
+              {assignableUsers.map(u => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
+              {currentOwnerIfNotAssignable &&
+                <option value={currentOwnerIfNotAssignable.id}>
+                  {currentOwnerIfNotAssignable.full_name || currentOwnerIfNotAssignable.email} (not an agent)
+                </option>}
             </select>
           ) : (
             <p className="text-sm">

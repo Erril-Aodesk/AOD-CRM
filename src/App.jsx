@@ -20,6 +20,12 @@ function RequireAdmin({ children }) {
   return children
 }
 
+function RequireManager({ children }) {
+  const { perms } = useAuth()
+  if (!perms?.isManager) return <Navigate to="/" replace />
+  return children
+}
+
 export default function App() {
   const { session, profile, loading } = useAuth()
 
@@ -37,7 +43,7 @@ export default function App() {
         <Route path="records/:objectTypeId" element={<RecordList />} />
         <Route path="records/:objectTypeId/:recordId" element={<RecordDetail />} />
         <Route path="callbacks" element={<Callbacks />} />
-        <Route path="reports" element={<Reports />} />
+        <Route path="reports" element={<RequireManager><Reports /></RequireManager>} />
         <Route path="import" element={<ImportExcel />} />
         <Route path="admin/objects" element={<RequireAdmin><ObjectTypes /></RequireAdmin>} />
         <Route path="admin/permissions" element={<RequireAdmin><Permissions /></RequireAdmin>} />

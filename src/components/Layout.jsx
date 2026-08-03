@@ -29,7 +29,7 @@ export default function Layout() {
       <nav className="flex-1 space-y-1 overflow-y-auto px-3">
         <Item to="/" icon={LayoutGrid} end>Dashboard</Item>
         <Item to="/callbacks" icon={PhoneCall}>Callbacks</Item>
-        <Item to="/reports" icon={BarChart3}>Reports</Item>
+        {perms?.isManager && <Item to="/reports" icon={BarChart3}>Reports</Item>}
         {visibleTypes.length > 0 && (
           <p className="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Records</p>
         )}
