@@ -7,6 +7,9 @@ import Spinner from '../components/Spinner'
 import Modal from '../components/Modal'
 import { Plus, Search, Trash2, Check, List, LayoutGrid } from 'lucide-react'
 
+const MIN_COL_WIDTH = 90
+const DEFAULT_COL_WIDTH = 160
+
 export default function RecordList() {
   const { objectTypeId } = useParams()
   const { objectTypes, fields, perms, profile } = useAuth()
@@ -18,6 +21,7 @@ export default function RecordList() {
   const [view, setView] = useState('list')
   const [creating, setCreating] = useState(false)
   const [filterValues, setFilterValues] = useState({})
+  const [colWidths, setColWidths] = useState({})
 
   const ot = objectTypes.find(o => o.id === objectTypeId)
   const cols = useMemo(() =>
@@ -77,6 +81,27 @@ export default function RecordList() {
     setDeleteAll(false)
     setToast(`Deleted ${count} record${count === 1 ? '' : 's'}`)
     loadRows()
+  }
+
+  const widthOf = (fieldId) => colWidths[fieldId] ?? DEFAULT_COL_WIDTH
+
+  const startResize = (e, fieldId) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.clientX
+    const startWidth = widthOf(fieldId)
+    document.body.style.userSelect = 'none'
+    const onMove = (ev) => {
+      const next = Math.max(MIN_COL_WIDTH, startWidth + (ev.clientX - startX))
+      setColWidths(w => ({ ...w, [fieldId]: next }))
+    }
+    const onUp = () => {
+      document.body.style.userSelect = ''
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
   }
 
   const saveField = async (record, field, value) => {
@@ -155,8 +180,19 @@ export default function RecordList() {
         <>
           {/* Desktop table */}
           <div className="card hidden overflow-x-auto sm:block">
-            <table className="w-full min-w-[640px]">
-              <thead><tr>{cols.map(c => <th key={c.id} className="th">{c.label}</th>)}</tr></thead>
+            <table style={{ tableLayout: 'fixed', width: cols.reduce((sum, c) => sum + widthOf(c.id), 0), minWidth: '100%' }}>
+              <colgroup>{cols.map(c => <col key={c.id} style={{ width: widthOf(c.id) }} />)}</colgroup>
+              <thead>
+                <tr>
+                  {cols.map(c => (
+                    <th key={c.id} className="th relative select-none">
+                      <span className="block truncate pr-2">{c.label}</span>
+                      <div onMouseDown={e => startResize(e, c.id)}
+                        className="absolute inset-y-0 right-0 w-2 cursor-col-resize hover:bg-brand/40" />
+                    </th>
+                  ))}
+                </tr>
+              </thead>
               <tbody>
                 {filtered.map(r => (
                   <tr key={r.id} className="cursor-pointer hover:bg-black/[.02]"
@@ -178,7 +214,7 @@ export default function RecordList() {
                           <DateTimeCell value={r.data[c.key]} onSave={v => saveField(r, c, v)} />
                         </td>
                       }
-                      return <td key={c.id} className="td"><FieldValue field={c} value={r.data[c.key]} /></td>
+                      return <td key={c.id} className="td break-words"><FieldValue field={c} value={r.data[c.key]} /></td>
                     })}
                   </tr>
                 ))}
