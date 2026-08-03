@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { FieldValue, FieldInput, PhoneCopyButton, coerceDefaultValue } from '../components/DynamicField'
 import Spinner from '../components/Spinner'
 import Modal from '../components/Modal'
-import { Plus, Search, Trash2, Check, List, LayoutGrid } from 'lucide-react'
+import { Plus, Search, Trash2, Check, List, LayoutGrid, ChevronLeft, ChevronRight } from 'lucide-react'
 
 const MIN_COL_WIDTH = 90
 const DEFAULT_COL_WIDTH = 160
@@ -22,6 +22,8 @@ export default function RecordList() {
   const [creating, setCreating] = useState(false)
   const [filterValues, setFilterValues] = useState({})
   const [colWidths, setColWidths] = useState({})
+  const [pageSize, setPageSize] = useState(50)
+  const [page, setPage] = useState(1)
 
   const ot = objectTypes.find(o => o.id === objectTypeId)
   const cols = useMemo(() =>
@@ -68,6 +70,7 @@ export default function RecordList() {
 
   useEffect(() => {
     setRows(null)
+    setPage(1)
     loadRows()
   }, [objectTypeId])
 
@@ -123,6 +126,11 @@ export default function RecordList() {
     return !sel || fieldValues(r, f).includes(sel)
   }))
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const currentPage = Math.min(page, totalPages)
+  const pageStart = (currentPage - 1) * pageSize
+  const paginated = filtered.slice(pageStart, pageStart + pageSize)
+
   const statusOptions = statusField?.options || []
   const kanbanColumns = statusField
     ? [...statusOptions.map(o => ({ key: o, label: o, records: filtered.filter(r => r.data[statusField.key] === o).sort(byPriority) })),
@@ -143,7 +151,8 @@ export default function RecordList() {
         <div className="ml-auto flex items-center gap-2">
           <div className="relative">
             <Search size={15} className="pointer-events-none absolute left-2.5 top-2.5 text-muted" />
-            <input className="input pl-8 w-44 sm:w-56" placeholder="Search" value={q} onChange={e => setQ(e.target.value)} />
+            <input className="input pl-8 w-44 sm:w-56" placeholder="Search" value={q}
+              onChange={e => { setQ(e.target.value); setPage(1) }} />
           </div>
           {perms?.canCreate(objectTypeId) &&
             <button className="btn-primary" onClick={() => setCreating(true)}><Plus size={16} /> New</button>}
@@ -158,13 +167,13 @@ export default function RecordList() {
         <div className="mb-4 flex flex-wrap items-center gap-2">
           {filterableFields.map(f => (
             <select key={f.id} className="input w-auto min-w-[140px]" value={filterValues[f.id] || ''}
-              onChange={e => setFilterValues(v => ({ ...v, [f.id]: e.target.value }))}>
+              onChange={e => { setFilterValues(v => ({ ...v, [f.id]: e.target.value })); setPage(1) }}>
               <option value="">{f.label}: All</option>
               {filterOptions(f).map(o => <option key={o} value={o}>{o}</option>)}
             </select>
           ))}
           {activeFilterCount > 0 &&
-            <button className="btn-ghost text-sm" onClick={() => setFilterValues({})}>Clear filters</button>}
+            <button className="btn-ghost text-sm" onClick={() => { setFilterValues({}); setPage(1) }}>Clear filters</button>}
         </div>
       )}
 
@@ -194,7 +203,7 @@ export default function RecordList() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(r => (
+                {paginated.map(r => (
                   <tr key={r.id} className="cursor-pointer hover:bg-black/[.02]"
                       onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}>
                     {cols.map(c => {
@@ -225,7 +234,7 @@ export default function RecordList() {
 
           {/* Mobile cards */}
           <div className="space-y-3 sm:hidden">
-            {filtered.map(r => (
+            {paginated.map(r => (
               <div key={r.id} role="button" tabIndex={0} className="card w-full cursor-pointer p-4 text-left"
                 onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}
                 onKeyDown={e => { if (e.key === 'Enter') nav(`/records/${objectTypeId}/${r.id}`) }}>
@@ -239,6 +248,25 @@ export default function RecordList() {
             ))}
             {filtered.length === 0 && <p className="py-8 text-center text-sm text-muted">No records yet.</p>}
           </div>
+
+          {filtered.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="text-muted">Rows per page</span>
+                <select className="input w-auto" value={pageSize}
+                  onChange={e => { setPageSize(Number(e.target.value)); setPage(1) }}>
+                  {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-muted">Page {currentPage} of {totalPages}</span>
+                <button className="btn-outline !px-2.5" disabled={currentPage <= 1}
+                  onClick={() => setPage(currentPage - 1)}><ChevronLeft size={15} /></button>
+                <button className="btn-outline !px-2.5" disabled={currentPage >= totalPages}
+                  onClick={() => setPage(currentPage + 1)}><ChevronRight size={15} /></button>
+              </div>
+            </div>
+          )}
         </>
       )}
 
