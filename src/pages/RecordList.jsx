@@ -29,7 +29,7 @@ export default function RecordList() {
   const [listRows, setListRows] = useState(null)
   const [listCount, setListCount] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
-  const [appointmentRecord, setAppointmentRecord] = useState(null)
+  const [appointmentState, setAppointmentState] = useState(null)
 
   const ot = objectTypes.find(o => o.id === objectTypeId)
   const cols = useMemo(() =>
@@ -293,7 +293,7 @@ export default function RecordList() {
                       if (editable && c.is_status_field) {
                         return <td key={c.id} className="td">
                           <StatusCell field={c} value={r.data[c.key]} onSave={v => saveField(r, c, v)}
-                            onAppointment={() => setAppointmentRecord(r)} />
+                            onAppointment={revert => setAppointmentState({ record: r, revert })} />
                         </td>
                       }
                       if (editable && c.key === 'notes') {
@@ -362,10 +362,16 @@ export default function RecordList() {
         <DeleteAllModal objectTypeId={objectTypeId} typeName={ot.name}
           onClose={() => setDeleteAll(false)} onDeleted={handleDeletedAll} />}
 
-      {appointmentRecord &&
-        <AppointmentModal record={appointmentRecord} ot={ot} defs={allFieldDefs}
-          onClose={() => setAppointmentRecord(null)}
-          onBooked={() => { setAppointmentRecord(null); setToast('Appointment booked and sent to manager') }} />}
+      {appointmentState &&
+        <AppointmentModal record={appointmentState.record} ot={ot} defs={allFieldDefs} statusField={statusField}
+          onClose={() => { appointmentState.revert(); setAppointmentState(null) }}
+          onBooked={newData => {
+            const id = appointmentState.record.id
+            setRows(rs => rs?.map(r => r.id === id ? { ...r, data: newData } : r) ?? rs)
+            setListRows(rs => rs?.map(r => r.id === id ? { ...r, data: newData } : r) ?? rs)
+            setAppointmentState(null)
+            setToast('Appointment booked and sent to manager')
+          }} />}
 
       {toast &&
         <div className="fixed bottom-4 right-4 z-50 rounded-lg bg-ok px-4 py-2.5 text-sm font-medium text-white shadow-pop">
@@ -483,19 +489,27 @@ function DeleteAllModal({ objectTypeId, typeName, onClose, onDeleted }) {
 
 function StatusCell({ field, value, onSave, onAppointment }) {
   const [saved, setSaved] = useState(false)
+  // "Appointment" is deferred: selecting it opens the booking popup instead of
+  // saving right away, so the dropdown shows it optimistically until the popup
+  // is submitted (real save) or cancelled (reverts, since nothing was ever saved).
+  const [pending, setPending] = useState(false)
+
+  useEffect(() => { if (value === 'Appointment') setPending(false) }, [value])
 
   const change = async (e) => {
     const newValue = e.target.value
-    const ok = await onSave(newValue)
-    if (ok) {
-      setSaved(true); setTimeout(() => setSaved(false), 1500)
-      if (newValue === 'Appointment') onAppointment?.()
+    if (newValue === 'Appointment') {
+      setPending(true)
+      onAppointment?.(() => setPending(false))
+      return
     }
+    const ok = await onSave(newValue)
+    if (ok) { setSaved(true); setTimeout(() => setSaved(false), 1500) }
   }
 
   return (
     <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-      <select className="input !h-8 !py-1 text-sm" value={value ?? ''} onChange={change}>
+      <select className="input !h-8 !py-1 text-sm" value={pending ? 'Appointment' : (value ?? '')} onChange={change}>
         <option value="">—</option>
         {(field.options || []).map(o => <option key={o} value={o}>{o}</option>)}
       </select>

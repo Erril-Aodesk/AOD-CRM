@@ -15,7 +15,7 @@ function matchField(defs, { type, keys }) {
   return defs.find(f => keys.some(k => f.key?.toLowerCase() === k || f.label?.toLowerCase() === k))
 }
 
-export default function AppointmentModal({ record, ot, defs, onClose, onBooked }) {
+export default function AppointmentModal({ record, ot, defs, statusField, onClose, onBooked }) {
   const { profile } = useAuth()
   const [managers, setManagers] = useState([])
   const [managerId, setManagerId] = useState('')
@@ -51,7 +51,7 @@ export default function AppointmentModal({ record, ot, defs, onClose, onBooked }
   const email = val(emailField)
 
   const submit = async () => {
-    if (!managerId) return
+    if (!managerId || !appointmentAt) return
     setSaving(true)
 
     const { error: insertError } = await supabase.from('appointments').insert({
@@ -64,6 +64,13 @@ export default function AppointmentModal({ record, ot, defs, onClose, onBooked }
       created_by: profile.id, sent_to_manager: managerId
     })
     if (insertError) { setSaving(false); return alert(insertError.message) }
+
+    // The lead's status only actually changes to "Appointment" once the popup is
+    // submitted — the caller deferred setting it when the user picked this option
+    // from the status dropdown, so we save it here alongside the rest of the booking.
+    const newData = { ...record.data, [statusField.key]: 'Appointment' }
+    const { error: statusError } = await supabase.from('records').update({ data: newData }).eq('id', record.id)
+    if (statusError) { setSaving(false); return alert(statusError.message) }
 
     const manager = managers.find(m => m.id === managerId)
     try {
@@ -91,14 +98,14 @@ export default function AppointmentModal({ record, ot, defs, onClose, onBooked }
     })
 
     setSaving(false)
-    onBooked?.()
+    onBooked?.(newData)
   }
 
   return (
     <Modal title="Book an appointment" onClose={onClose} wide
       footer={<>
         <button className="btn-ghost" onClick={onClose}>Cancel</button>
-        <button className="btn-primary" disabled={saving || !managerId} onClick={submit}>
+        <button className="btn-primary" disabled={saving || !managerId || !appointmentAt} onClick={submit}>
           {saving ? 'Sending…' : 'Send to manager'}
         </button>
       </>}>
@@ -118,7 +125,7 @@ export default function AppointmentModal({ record, ot, defs, onClose, onBooked }
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div><label className="label">Looking for</label>
             <input className="input" value={lookingFor} onChange={e => setLookingFor(e.target.value)} /></div>
-          <div><label className="label">Date of appointment</label>
+          <div><label className="label">Date of appointment<span className="text-danger"> *</span></label>
             <input type="datetime-local" className="input" value={appointmentAt} onChange={e => setAppointmentAt(e.target.value)} /></div>
           <div><label className="label">Organization size</label>
             <input className="input" value={orgSize} onChange={e => setOrgSize(e.target.value)}
@@ -134,7 +141,7 @@ export default function AppointmentModal({ record, ot, defs, onClose, onBooked }
         <div><label className="label">Notes</label>
           <textarea className="input" rows={2} value={notes} onChange={e => setNotes(e.target.value)} /></div>
 
-        <div><label className="label">Send to manager</label>
+        <div><label className="label">Send to manager<span className="text-danger"> *</span></label>
           <select className="input" value={managerId} onChange={e => setManagerId(e.target.value)}>
             <option value="">Choose a manager…</option>
             {managers.map(m => <option key={m.id} value={m.id}>{m.full_name || m.email}</option>)}

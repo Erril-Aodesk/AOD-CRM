@@ -21,6 +21,7 @@ export default function RecordDetail() {
           .sort((a, b) => a.sort_order - b.sort_order), [fields, objectTypeId, perms])
   const canEdit = perms?.canEdit(objectTypeId)
   const canAssign = perms?.isManager
+  const statusField = fields.find(f => f.object_type_id === objectTypeId && f.is_status_field)
   const [users, setUsers] = useState([])
   const [appointmentOpen, setAppointmentOpen] = useState(false)
 
@@ -42,9 +43,12 @@ export default function RecordDetail() {
   const currentOwnerIfNotAssignable = rec && rec.owner_id && !assignableUsers.some(u => u.id === rec.owner_id)
     ? users.find(u => u.id === rec.owner_id) : null
 
+  // "Appointment" is deferred: picking it opens the booking popup instead of
+  // staging the change, so the field keeps its previous value (and the form's
+  // eventual Save keeps working as before) unless the popup is submitted.
   const onFieldChange = (f, v) => {
+    if (f.is_status_field && v === 'Appointment') { setAppointmentOpen(true); return }
     setData(d => ({ ...d, [f.key]: v }))
-    if (f.is_status_field && v === 'Appointment') setAppointmentOpen(true)
   }
 
   const changeOwner = async (id) => {
@@ -134,9 +138,13 @@ export default function RecordDetail() {
       </div>
 
       {appointmentOpen &&
-        <AppointmentModal record={{ ...rec, data }} ot={ot} defs={defs}
+        <AppointmentModal record={{ ...rec, data }} ot={ot} defs={defs} statusField={statusField}
           onClose={() => setAppointmentOpen(false)}
-          onBooked={() => setAppointmentOpen(false)} />}
+          onBooked={newData => {
+            setData(newData)
+            setRec(r => ({ ...r, data: newData }))
+            setAppointmentOpen(false)
+          }} />}
     </div>
   )
 }
