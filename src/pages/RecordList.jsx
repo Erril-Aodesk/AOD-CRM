@@ -17,6 +17,7 @@ export default function RecordList() {
   const [toast, setToast] = useState('')
   const [view, setView] = useState('list')
   const [creating, setCreating] = useState(false)
+  const [filterValues, setFilterValues] = useState({})
 
   const ot = objectTypes.find(o => o.id === objectTypeId)
   const cols = useMemo(() =>
@@ -25,6 +26,22 @@ export default function RecordList() {
     [fields, objectTypeId, perms])
   const statusField = fields.find(f => f.object_type_id === objectTypeId && f.is_status_field)
   const callbackField = fields.find(f => f.object_type_id === objectTypeId && f.key === 'callback_date_time')
+  const filterableFields = fields.filter(f =>
+    f.object_type_id === objectTypeId && perms?.fieldVisible(f.id) &&
+    (f.field_type === 'select' || f.is_status_field || f.key?.toLowerCase() === 'industry' || f.label?.toLowerCase() === 'industry')
+  ).sort((a, b) => a.sort_order - b.sort_order)
+
+  const fieldValues = (r, field) => {
+    const v = r.data[field.key]
+    if (v === null || v === undefined || v === '') return []
+    return Array.isArray(v) ? v : [v]
+  }
+  const filterOptions = (field) => {
+    const set = new Set()
+    rows?.forEach(r => fieldValues(r, field).forEach(v => set.add(v)))
+    return [...set].sort()
+  }
+  const activeFilterCount = filterableFields.filter(f => filterValues[f.id]).length
   const isRecordToday = (r) => {
     if (!callbackField) return false
     const raw = r.data[callbackField.key]
@@ -69,9 +86,13 @@ export default function RecordList() {
   if (!ot) return <p className="text-muted">Record type not found or no access.</p>
   if (rows === null) return <Spinner label={`Loading ${ot.name}…`} />
 
-  const filtered = q
+  const filtered = (q
     ? rows.filter(r => JSON.stringify(r.data).toLowerCase().includes(q.toLowerCase()))
     : rows
+  ).filter(r => filterableFields.every(f => {
+    const sel = filterValues[f.id]
+    return !sel || fieldValues(r, f).includes(sel)
+  }))
 
   const statusOptions = statusField?.options || []
   const kanbanColumns = statusField
@@ -103,6 +124,20 @@ export default function RecordList() {
             </button>}
         </div>
       </div>
+
+      {filterableFields.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {filterableFields.map(f => (
+            <select key={f.id} className="input w-auto min-w-[140px]" value={filterValues[f.id] || ''}
+              onChange={e => setFilterValues(v => ({ ...v, [f.id]: e.target.value }))}>
+              <option value="">{f.label}: All</option>
+              {filterOptions(f).map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+          ))}
+          {activeFilterCount > 0 &&
+            <button className="btn-ghost text-sm" onClick={() => setFilterValues({})}>Clear filters</button>}
+        </div>
+      )}
 
       {view === 'kanban' ? (
         statusField ? (
