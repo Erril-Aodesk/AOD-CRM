@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import NotificationBell from './NotificationBell'
 import { LayoutGrid, PhoneCall, Upload, Settings, Users, Database,
-         Shield, LogOut, Menu, X } from 'lucide-react'
+         Shield, LogOut, Menu, X, BarChart3 } from 'lucide-react'
 
 export default function Layout() {
   const { profile, role, perms, objectTypes, signOut } = useAuth()
@@ -29,6 +29,7 @@ export default function Layout() {
       <nav className="flex-1 space-y-1 overflow-y-auto px-3">
         <Item to="/" icon={LayoutGrid} end>Dashboard</Item>
         <Item to="/callbacks" icon={PhoneCall}>Callbacks</Item>
+        <Item to="/reports" icon={BarChart3}>Reports</Item>
         {visibleTypes.length > 0 && (
           <p className="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-muted">Records</p>
         )}
