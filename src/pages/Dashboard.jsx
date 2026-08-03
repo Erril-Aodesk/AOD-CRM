@@ -5,6 +5,11 @@ import { useAuth } from '../context/AuthContext'
 import { aggregateFieldCounts } from '../lib/reportAggregates'
 import { Database, PhoneCall, Tag } from 'lucide-react'
 
+// "Unset" is a synthetic bucket for missing values, not a real status option —
+// there's no dropdown value to filter by, so those tiles link unfiltered.
+const statusLink = (otId, statusName) =>
+  statusName === 'Unset' ? `/records/${otId}` : `/records/${otId}?status=${encodeURIComponent(statusName)}`
+
 const PROMINENT_STATUSES = ['New', 'Callback', 'Qualified', 'Rejected']
 const PROMINENT_STYLES = {
   new: 'bg-brand-soft text-brand',
@@ -102,7 +107,7 @@ export default function Dashboard() {
           {sec.large.length > 0 && (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {sec.large.map(s => (
-                <Link key={s.name} to={`/records/${sec.ot.id}`} className="card p-5 hover:shadow-pop transition-shadow">
+                <Link key={s.name} to={statusLink(sec.ot.id, s.name)} className="card p-5 hover:shadow-pop transition-shadow">
                   <div className="flex items-center gap-3">
                     <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg ${PROMINENT_STYLES[s.name.toLowerCase()] || 'bg-brand-soft text-brand'}`}>
                       <Tag size={20} />
@@ -120,7 +125,7 @@ export default function Dashboard() {
           {sec.small.length > 0 && (
             <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
               {sec.small.map(s => (
-                <Link key={s.name} to={`/records/${sec.ot.id}`} className="card p-3 text-center hover:shadow-pop transition-shadow">
+                <Link key={s.name} to={statusLink(sec.ot.id, s.name)} className="card p-3 text-center hover:shadow-pop transition-shadow">
                   <p className="text-lg font-semibold">{s.count}</p>
                   <p className="truncate text-xs text-muted">{s.name}</p>
                 </Link>

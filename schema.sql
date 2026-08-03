@@ -402,6 +402,20 @@ begin
 end $$;
 
 -- ============================================================================
+-- REPORTING  (grouped counts for Dashboard/Reports, one query instead of one
+-- per possible value). No SECURITY DEFINER: runs as the calling user, so the
+-- records_select RLS policy still scopes the count the same as any query.
+-- ============================================================================
+create or replace function count_by_field_value(p_object_type_id uuid, p_field_key text)
+returns table(value text, count bigint)
+language sql stable set search_path = public as $$
+  select coalesce(data ->> p_field_key, 'Unset') as value, count(*)
+  from records
+  where object_type_id = p_object_type_id
+  group by coalesce(data ->> p_field_key, 'Unset');
+$$;
+
+-- ============================================================================
 -- BOOTSTRAP  (create an org with the 4 default roles in one call)
 -- ============================================================================
 create or replace function bootstrap_org(p_org_name text)

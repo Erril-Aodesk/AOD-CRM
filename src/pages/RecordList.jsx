@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { FieldValue, FieldInput, PhoneCopyButton, coerceDefaultValue } from '../components/DynamicField'
@@ -14,6 +14,7 @@ export default function RecordList() {
   const { objectTypeId } = useParams()
   const { objectTypes, fields, perms, profile } = useAuth()
   const nav = useNavigate()
+  const [searchParams] = useSearchParams()
   const [rows, setRows] = useState(null)
   const [q, setQ] = useState('')
   const [deleteAll, setDeleteAll] = useState(false)
@@ -65,6 +66,33 @@ export default function RecordList() {
     return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
   }
   const byPriority = (a, b) => (isRecordToday(b) ? 1 : 0) - (isRecordToday(a) ? 1 : 0)
+
+  // A Dashboard status tile links here with ?status=<value>. Applied synchronously
+  // during render (React's supported "adjust state on prop change" escape hatch)
+  // rather than in an effect, so the very first list query already carries the
+  // filter — an effect would fire loadListRows once unfiltered before the state
+  // update landed, racing an extra request against the correctly-filtered one.
+  const appliedStatusRef = useRef(null)
+  const statusParam = searchParams.get('status')
+  const statusSyncKey = `${objectTypeId}::${statusParam || ''}`
+  if (statusField && statusParam && appliedStatusRef.current !== statusSyncKey) {
+    appliedStatusRef.current = statusSyncKey
+    setFilterValues(v => ({ ...v, [statusField.id]: statusParam }))
+    setPage(1)
+  }
+
+  // Column widths persist per user per record type, in this browser only.
+  const colWidthsKey = profile?.id && `crm.colWidths.${profile.id}.${objectTypeId}`
+
+  useEffect(() => {
+    if (!colWidthsKey) return
+    try {
+      const raw = localStorage.getItem(colWidthsKey)
+      setColWidths(raw ? JSON.parse(raw) : {})
+    } catch {
+      setColWidths({})
+    }
+  }, [colWidthsKey])
 
   // listCount/totalCount come from count: 'exact' queries, which return an accurate
   // total straight from Postgres regardless of Supabase's 1000-row response cap —
@@ -138,15 +166,21 @@ export default function RecordList() {
     e.stopPropagation()
     const startX = e.clientX
     const startWidth = widthOf(fieldId)
+    let latest = colWidths
     document.body.style.userSelect = 'none'
     const onMove = (ev) => {
       const next = Math.max(MIN_COL_WIDTH, startWidth + (ev.clientX - startX))
-      setColWidths(w => ({ ...w, [fieldId]: next }))
+      latest = { ...latest, [fieldId]: next }
+      setColWidths(latest)
     }
     const onUp = () => {
       document.body.style.userSelect = ''
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
+      // Persist once, at drag end, rather than on every mousemove.
+      if (colWidthsKey) {
+        try { localStorage.setItem(colWidthsKey, JSON.stringify(latest)) } catch { /* storage unavailable */ }
+      }
     }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
