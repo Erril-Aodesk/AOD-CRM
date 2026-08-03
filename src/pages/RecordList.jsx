@@ -21,7 +21,11 @@ export default function RecordList() {
 
   const ot = objectTypes.find(o => o.id === objectTypeId)
   const cols = useMemo(() =>
-    fields.filter(f => f.object_type_id === objectTypeId && f.show_in_list !== false && perms?.fieldVisible(f.id))
+    fields.filter(f => f.object_type_id === objectTypeId && f.show_in_list !== false &&
+      // The status field drives Kanban grouping and the filter bar regardless of a
+      // role's field-view override (see statusField/filterableFields below) — keep
+      // the List view's column set consistent with that instead of hiding it.
+      (f.is_status_field || perms?.fieldVisible(f.id)))
           .sort((a, b) => a.sort_order - b.sort_order),
     [fields, objectTypeId, perms])
   const statusField = fields.find(f => f.object_type_id === objectTypeId && f.is_status_field)
