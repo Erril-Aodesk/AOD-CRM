@@ -24,6 +24,9 @@ export default function RecordList() {
   const [colWidths, setColWidths] = useState({})
   const [pageSize, setPageSize] = useState(50)
   const [page, setPage] = useState(1)
+  const [listRows, setListRows] = useState(null)
+  const [listCount, setListCount] = useState(0)
+  const [totalCount, setTotalCount] = useState(0)
 
   const ot = objectTypes.find(o => o.id === objectTypeId)
   const cols = useMemo(() =>
@@ -63,16 +66,55 @@ export default function RecordList() {
   }
   const byPriority = (a, b) => (isRecordToday(b) ? 1 : 0) - (isRecordToday(a) ? 1 : 0)
 
+  // listCount/totalCount come from count: 'exact' queries, which return an accurate
+  // total straight from Postgres regardless of Supabase's 1000-row response cap —
+  // unlike `rows` below (used only for Kanban/filter options), they're never capped.
+  const totalPages = Math.max(1, Math.ceil(listCount / pageSize))
+  const currentPage = Math.min(page, totalPages)
+
+  // Search and filters are applied here, server-side, so they run against every
+  // matching record rather than only the first 1000 fetched into `rows`.
+  const buildListQuery = () => {
+    let query = supabase.from('records').select('*', { count: 'exact' }).eq('object_type_id', objectTypeId)
+    if (q) query = query.filter('data::text', 'ilike', `%${q}%`)
+    filterableFields.forEach(f => {
+      const sel = filterValues[f.id]
+      if (!sel) return
+      query = f.field_type === 'multiselect'
+        ? query.contains(`data->${f.key}`, [sel])
+        : query.eq(`data->>${f.key}`, sel)
+    })
+    return query
+  }
+
   const loadRows = () =>
     supabase.from('records').select('*').eq('object_type_id', objectTypeId)
       .order('created_at', { ascending: false })
       .then(({ data }) => setRows(data || []))
+
+  const loadListRows = () => {
+    setListRows(null)
+    buildListQuery()
+      .order('created_at', { ascending: false })
+      .range((currentPage - 1) * pageSize, currentPage * pageSize - 1)
+      .then(({ data, count }) => { setListRows(data || []); setListCount(count ?? 0) })
+  }
+
+  const loadTotalCount = () =>
+    supabase.from('records').select('id', { count: 'exact', head: true }).eq('object_type_id', objectTypeId)
+      .then(({ count }) => setTotalCount(count ?? 0))
 
   useEffect(() => {
     setRows(null)
     setPage(1)
     loadRows()
   }, [objectTypeId])
+
+  useEffect(() => { loadTotalCount() }, [objectTypeId])
+
+  useEffect(() => {
+    loadListRows()
+  }, [objectTypeId, q, filterValues, pageSize, currentPage])
 
   useEffect(() => {
     if (!toast) return
@@ -84,6 +126,9 @@ export default function RecordList() {
     setDeleteAll(false)
     setToast(`Deleted ${count} record${count === 1 ? '' : 's'}`)
     loadRows()
+    setPage(1)
+    loadListRows()
+    loadTotalCount()
   }
 
   const widthOf = (fieldId) => colWidths[fieldId] ?? DEFAULT_COL_WIDTH
@@ -111,7 +156,8 @@ export default function RecordList() {
     const newData = { ...record.data, [field.key]: value }
     const { error } = await supabase.from('records').update({ data: newData }).eq('id', record.id)
     if (error) { alert(error.message); return false }
-    setRows(rs => rs.map(r => r.id === record.id ? { ...r, data: newData } : r))
+    setRows(rs => rs?.map(r => r.id === record.id ? { ...r, data: newData } : r) ?? rs)
+    setListRows(rs => rs?.map(r => r.id === record.id ? { ...r, data: newData } : r) ?? rs)
     return true
   }
 
@@ -126,11 +172,6 @@ export default function RecordList() {
     return !sel || fieldValues(r, f).includes(sel)
   }))
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
-  const currentPage = Math.min(page, totalPages)
-  const pageStart = (currentPage - 1) * pageSize
-  const paginated = filtered.slice(pageStart, pageStart + pageSize)
-
   const statusOptions = statusField?.options || []
   const kanbanColumns = statusField
     ? [...statusOptions.map(o => ({ key: o, label: o, records: filtered.filter(r => r.data[statusField.key] === o).sort(byPriority) })),
@@ -141,7 +182,7 @@ export default function RecordList() {
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold">{ot.name}</h1>
-        <span className="chip bg-brand-soft text-brand-dark">{rows.length}</span>
+        <span className="chip bg-brand-soft text-brand-dark">{totalCount}</span>
         <div className="inline-flex rounded-lg border border-line p-0.5">
           <button className={`rounded-md px-2.5 py-1.5 ${view === 'list' ? 'bg-brand text-white' : 'text-muted hover:text-ink'}`}
             title="List view" onClick={() => setView('list')}><List size={15} /></button>
@@ -185,6 +226,8 @@ export default function RecordList() {
             No status field is set for {ot.name}. Mark one as the status field in Record types to use Kanban view.
           </div>
         )
+      ) : listRows === null ? (
+        <Spinner label="Loading records…" />
       ) : (
         <>
           {/* Desktop table */}
@@ -203,7 +246,7 @@ export default function RecordList() {
                 </tr>
               </thead>
               <tbody>
-                {paginated.map(r => (
+                {listRows.map(r => (
                   <tr key={r.id} className="cursor-pointer hover:bg-black/[.02]"
                       onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}>
                     {cols.map(c => {
@@ -229,12 +272,12 @@ export default function RecordList() {
                 ))}
               </tbody>
             </table>
-            {filtered.length === 0 && <p className="p-8 text-center text-sm text-muted">No records yet. Create one or import from Excel.</p>}
+            {listRows.length === 0 && <p className="p-8 text-center text-sm text-muted">No records yet. Create one or import from Excel.</p>}
           </div>
 
           {/* Mobile cards */}
           <div className="space-y-3 sm:hidden">
-            {paginated.map(r => (
+            {listRows.map(r => (
               <div key={r.id} role="button" tabIndex={0} className="card w-full cursor-pointer p-4 text-left"
                 onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}
                 onKeyDown={e => { if (e.key === 'Enter') nav(`/records/${objectTypeId}/${r.id}`) }}>
@@ -246,10 +289,10 @@ export default function RecordList() {
                 ))}
               </div>
             ))}
-            {filtered.length === 0 && <p className="py-8 text-center text-sm text-muted">No records yet.</p>}
+            {listRows.length === 0 && <p className="py-8 text-center text-sm text-muted">No records yet.</p>}
           </div>
 
-          {filtered.length > 0 && (
+          {listCount > 0 && (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm">
               <div className="flex items-center gap-2">
                 <span className="text-muted">Rows per page</span>

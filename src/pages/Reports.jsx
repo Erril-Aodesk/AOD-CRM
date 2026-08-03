@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { aggregateFieldCounts } from '../lib/reportAggregates'
 import Spinner from '../components/Spinner'
 import { Download } from 'lucide-react'
 import {
@@ -23,22 +24,33 @@ const formatForExport = (field, value) => {
   return value
 }
 
+// Fetches every matching record in 1000-row pages — a plain select() alone would
+// silently stop at Supabase's default response cap.
+const fetchAllRecords = async (otId) => {
+  const all = []
+  let from = 0
+  const chunk = 1000
+  while (true) {
+    const { data } = await supabase.from('records').select('*').eq('object_type_id', otId).range(from, from + chunk - 1)
+    if (!data || data.length === 0) break
+    all.push(...data)
+    if (data.length < chunk) break
+    from += chunk
+  }
+  return all
+}
+
 export default function Reports() {
   const { objectTypes, fields, perms } = useAuth()
   const viewable = useMemo(() => objectTypes.filter(ot => perms?.canView(ot.id)), [objectTypes, perms])
   const [otId, setOtId] = useState('')
-  const [rows, setRows] = useState(null)
+  const [statusData, setStatusData] = useState(null)
+  const [industryData, setIndustryData] = useState(null)
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     if (!otId && viewable[0]) setOtId(viewable[0].id)
   }, [viewable, otId])
-
-  useEffect(() => {
-    if (!otId) return
-    setRows(null)
-    supabase.from('records').select('*').eq('object_type_id', otId)
-      .then(({ data }) => setRows(data || []))
-  }, [otId])
 
   const ot = objectTypes.find(o => o.id === otId)
   const defs = useMemo(() =>
@@ -49,51 +61,40 @@ export default function Reports() {
   const industryField = fields.find(f => f.object_type_id === otId &&
     (f.key?.toLowerCase() === 'industry' || f.label?.toLowerCase() === 'industry'))
 
-  const statusData = useMemo(() => {
-    if (!statusField || !rows) return []
-    const opts = statusField.options || []
-    const counts = new Map(opts.map(o => [o, 0]))
-    let unset = 0
-    rows.forEach(r => {
-      const v = r.data[statusField.key]
-      if (v && counts.has(v)) counts.set(v, counts.get(v) + 1)
-      else unset++
-    })
-    const data = opts.map(o => ({ name: o, count: counts.get(o) }))
-    if (unset > 0) data.push({ name: 'Unset', count: unset })
-    return data
-  }, [statusField, rows])
+  useEffect(() => {
+    if (!otId) return
+    setStatusData(null)
+    setIndustryData(null)
+    if (statusField) aggregateFieldCounts(otId, statusField).then(setStatusData)
+    else setStatusData([])
+    if (industryField) aggregateFieldCounts(otId, industryField).then(setIndustryData)
+    else setIndustryData([])
+  }, [otId, statusField, industryField])
 
-  const industryData = useMemo(() => {
-    if (!industryField || !rows) return []
-    const counts = new Map()
-    rows.forEach(r => {
-      const raw = r.data[industryField.key]
-      const values = Array.isArray(raw) ? raw : (raw ? [raw] : [])
-      if (values.length === 0) { counts.set('Unset', (counts.get('Unset') || 0) + 1); return }
-      values.forEach(v => counts.set(v, (counts.get(v) || 0) + 1))
-    })
-    return [...counts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)
-  }, [industryField, rows])
+  const loading = statusData === null || industryData === null
 
   // Pie slices are capped at 8 categorical slots; overflow folds into "Other" rather than generating more hues.
   const pieSlices = useMemo(() => {
-    const nonZero = statusData.filter(d => d.count > 0)
+    const nonZero = (statusData || []).filter(d => d.count > 0)
     if (nonZero.length <= 8) return nonZero
     const top = nonZero.slice(0, 7)
     const rest = nonZero.slice(7).reduce((n, d) => n + d.count, 0)
     return [...top, { name: 'Other', count: rest }]
   }, [statusData])
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
+    setExporting(true)
+    const allRecords = await fetchAllRecords(otId)
+    setExporting(false)
+
     const summaryAoa = [
       ['Status', 'Count'],
-      ...statusData.map(d => [d.name, d.count]),
+      ...(statusData || []).map(d => [d.name, d.count]),
       [],
       ['Industry', 'Count'],
-      ...industryData.map(d => [d.name, d.count])
+      ...(industryData || []).map(d => [d.name, d.count])
     ]
-    const recordRows = (rows || []).map(r => {
+    const recordRows = allRecords.map(r => {
       const row = {}
       defs.forEach(f => { row[f.label] = formatForExport(f, r.data[f.key]) })
       return row
@@ -114,12 +115,12 @@ export default function Reports() {
         <select className="input w-auto min-w-[180px]" value={otId} onChange={e => setOtId(e.target.value)}>
           {viewable.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
         </select>
-        <button className="btn-outline ml-auto" disabled={!rows} onClick={exportExcel}>
-          <Download size={15} /> Export to Excel
+        <button className="btn-outline ml-auto" disabled={loading || exporting} onClick={exportExcel}>
+          <Download size={15} /> {exporting ? 'Exporting…' : 'Export to Excel'}
         </button>
       </div>
 
-      {rows === null ? <Spinner label="Loading report…" /> : (
+      {loading ? <Spinner label="Loading report…" /> : (
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <ChartCard title="Records by status">
