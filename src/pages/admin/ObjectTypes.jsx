@@ -12,6 +12,7 @@ export default function ObjectTypes() {
   const [sel, setSel] = useState(objectTypes[0]?.id || '')
   const [newType, setNewType] = useState(false)
   const [fieldModal, setFieldModal] = useState(null)
+  const [renaming, setRenaming] = useState(false)
   const [users, setUsers] = useState([])
 
   const current = objectTypes.find(o => o.id === sel)
@@ -35,6 +36,10 @@ export default function ObjectTypes() {
   }
   const delField = async (id) => {
     await supabase.from('field_definitions').delete().eq('id', id); await refresh()
+  }
+  const renameType = async (name) => {
+    const { error } = await supabase.from('object_types').update({ name }).eq('id', sel)
+    if (error) alert(error.message); else { setRenaming(false); await refresh() }
   }
   const setDefaultAgent = async (agentId) => {
     await supabase.from('object_types').update({ default_agent_id: agentId || null }).eq('id', sel)
@@ -133,6 +138,9 @@ export default function ObjectTypes() {
               <button className="btn-outline ml-auto" onClick={() => setFieldModal({ object_type_id: sel })}>
                 <Plus size={15} /> Add field
               </button>
+              <button className="btn-outline" onClick={() => setRenaming(true)}>
+                <Pencil size={15} /> Rename
+              </button>
               <button className="btn-outline" onClick={() => duplicateType(current)}>
                 <Copy size={15} /> Duplicate
               </button>
@@ -177,6 +185,8 @@ export default function ObjectTypes() {
       </div>
 
       {newType && <NameModal title="New record type" onClose={() => setNewType(false)} onSave={addType} />}
+      {renaming && <NameModal title="Rename record type" initial={current.name} saveLabel="Save"
+        onClose={() => setRenaming(false)} onSave={renameType} />}
       {fieldModal && <FieldModal object_type_id={sel} count={defs.length} orgId={profile.org_id}
         field={fieldModal.id ? fieldModal : null}
         onClose={() => setFieldModal(null)} onSaved={async () => { setFieldModal(null); await refresh() }} />}
@@ -184,12 +194,12 @@ export default function ObjectTypes() {
   )
 }
 
-function NameModal({ title, onClose, onSave }) {
-  const [name, setName] = useState('')
+function NameModal({ title, initial = '', saveLabel = 'Create', onClose, onSave }) {
+  const [name, setName] = useState(initial)
   return (
     <Modal title={title} onClose={onClose}
       footer={<><button className="btn-ghost" onClick={onClose}>Cancel</button>
-        <button className="btn-primary" disabled={!name.trim()} onClick={() => onSave(name.trim())}>Create</button></>}>
+        <button className="btn-primary" disabled={!name.trim()} onClick={() => onSave(name.trim())}>{saveLabel}</button></>}>
       <label className="label">Name</label>
       <input className="input" autoFocus value={name} onChange={e => setName(e.target.value)}
         placeholder="e.g. Lead, Client, Candidate" />
