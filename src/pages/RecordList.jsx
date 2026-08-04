@@ -3,6 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { FieldValue, FieldInput, PhoneCopyButton, coerceDefaultValue } from '../components/DynamicField'
+import { matchField } from '../lib/fieldMatch'
 import Spinner from '../components/Spinner'
 import Modal from '../components/Modal'
 import AppointmentModal from '../components/AppointmentModal'
@@ -45,6 +46,11 @@ export default function RecordList() {
   // Full field set (not just show_in_list columns) — AppointmentModal needs to
   // find fields like position/address/company that may not be list columns.
   const allFieldDefs = fields.filter(f => f.object_type_id === objectTypeId && perms?.fieldVisible(f.id))
+  // Same heuristic the appointment popup uses to find these concepts among
+  // this record type's dynamic fields — key/label spellings vary per org.
+  const nameField = matchField(allFieldDefs, { keys: ['name', 'full_name', 'contact_name', 'lead_name'] })
+  const companyField = matchField(allFieldDefs, { keys: ['company', 'business', 'business_name', 'company_name'] })
+  const phoneField = matchField(allFieldDefs, { type: 'phone', keys: ['phone', 'phone_number', 'mobile'] })
   const filterableFields = fields.filter(f =>
     f.object_type_id === objectTypeId && perms?.fieldVisible(f.id) &&
     (f.field_type === 'select' || f.is_status_field || f.key?.toLowerCase() === 'industry' || f.label?.toLowerCase() === 'industry')
@@ -106,10 +112,18 @@ export default function RecordList() {
   const currentPage = Math.min(page, totalPages)
 
   // Search and filters are applied here, server-side, so they run against every
-  // matching record rather than only the first 1000 fetched into `rows`.
+  // matching record rather than only the first 1000 fetched into `rows`. A
+  // search term goes through the search_records RPC, which also matches the
+  // phone field digits-only so formatting (spaces, dashes, +) never blocks a
+  // match — plain .filter('data::text','ilike',…) can't do that comparison.
   const buildListQuery = () => {
-    let query = supabase.from('records').select('*', { count: 'exact' }).eq('object_type_id', objectTypeId)
-    if (q) query = query.filter('data::text', 'ilike', `%${q}%`)
+    let query = q
+      ? supabase.rpc('search_records', {
+          p_object_type_id: objectTypeId, p_query: q,
+          p_name_key: nameField?.key || null, p_company_key: companyField?.key || null,
+          p_phone_key: phoneField?.key || null
+        }, { count: 'exact' })
+      : supabase.from('records').select('*', { count: 'exact' }).eq('object_type_id', objectTypeId)
     filterableFields.forEach(f => {
       const sel = filterValues[f.id]
       if (!sel) return
@@ -203,10 +217,19 @@ export default function RecordList() {
   if (!ot) return <p className="text-muted">Record type not found or no access.</p>
   if (rows === null) return <Spinner label={`Loading ${ot.name}…`} />
 
-  const filtered = (q
-    ? rows.filter(r => JSON.stringify(r.data).toLowerCase().includes(q.toLowerCase()))
-    : rows
-  ).filter(r => filterableFields.every(f => {
+  // Kanban searches the locally-loaded (capped) rows client-side, so it mirrors
+  // the RPC's two match modes: plain substring, and phone digits-only.
+  const qDigits = q.replace(/[^0-9]/g, '')
+  const matchesSearch = (r) => {
+    if (!q) return true
+    if (JSON.stringify(r.data).toLowerCase().includes(q.toLowerCase())) return true
+    if (qDigits && phoneField) {
+      const phoneDigits = String(r.data[phoneField.key] ?? '').replace(/[^0-9]/g, '')
+      if (phoneDigits.includes(qDigits)) return true
+    }
+    return false
+  }
+  const filtered = rows.filter(matchesSearch).filter(r => filterableFields.every(f => {
     const sel = filterValues[f.id]
     return !sel || fieldValues(r, f).includes(sel)
   }))
@@ -231,7 +254,7 @@ export default function RecordList() {
         <div className="ml-auto flex items-center gap-2">
           <div className="relative">
             <Search size={15} className="pointer-events-none absolute left-2.5 top-2.5 text-muted" />
-            <input className="input pl-8 w-44 sm:w-56" placeholder="Search" value={q}
+            <input className="input pl-8 w-44 sm:w-56" placeholder="Search name, company, phone…" value={q}
               onChange={e => { setQ(e.target.value); setPage(1) }} />
           </div>
           {perms?.canCreate(objectTypeId) &&

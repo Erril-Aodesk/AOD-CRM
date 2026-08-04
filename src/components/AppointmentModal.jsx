@@ -1,19 +1,8 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { matchField } from '../lib/fieldMatch'
 import Modal from './Modal'
-
-// Best-effort mapping from this record type's dynamic fields to the fixed
-// concepts the appointment form needs — field keys/labels vary per org, so a
-// dedicated field_type (phone/email) is trusted first, then common key/label
-// spellings. A field that doesn't match just shows "—" in the snapshot.
-function matchField(defs, { type, keys }) {
-  if (type) {
-    const byType = defs.find(f => f.field_type === type)
-    if (byType) return byType
-  }
-  return defs.find(f => keys.some(k => f.key?.toLowerCase() === k || f.label?.toLowerCase() === k))
-}
 
 export default function AppointmentModal({ record, ot, defs, statusField, onClose, onBooked }) {
   const { profile } = useAuth()
