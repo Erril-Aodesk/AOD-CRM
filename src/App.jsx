@@ -28,6 +28,12 @@ function RequireManager({ children }) {
   return children
 }
 
+function RequireActivityAccess({ children }) {
+  const { perms } = useAuth()
+  if (!perms?.canViewActivity) return <Navigate to="/" replace />
+  return children
+}
+
 export default function App() {
   const { session, profile, loading } = useAuth()
 
@@ -47,7 +53,7 @@ export default function App() {
         <Route path="callbacks" element={<Callbacks />} />
         <Route path="reports" element={<RequireManager><Reports /></RequireManager>} />
         <Route path="appointments" element={<RequireManager><Appointments /></RequireManager>} />
-        <Route path="activity" element={<RequireManager><Activity /></RequireManager>} />
+        <Route path="activity" element={<RequireActivityAccess><Activity /></RequireActivityAccess>} />
         <Route path="import" element={<ImportExcel />} />
         <Route path="admin/objects" element={<RequireAdmin><ObjectTypes /></RequireAdmin>} />
         <Route path="admin/permissions" element={<RequireAdmin><Permissions /></RequireAdmin>} />

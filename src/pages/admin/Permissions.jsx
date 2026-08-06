@@ -44,6 +44,11 @@ export default function Permissions() {
   const role = roles.find(r => r.id === roleId)
   const isAdminRole = role?.is_admin
 
+  const saveRole = async (patch) => {
+    setRoles(rs => rs.map(r => r.id === roleId ? { ...r, ...patch } : r))
+    await supabase.from('roles').update(patch).eq('id', roleId)
+  }
+
   const saveObj = async (otId, patch) => {
     const base = objPerms[otId] || { role_id: roleId, org_id: profile.org_id, object_type_id: otId,
       can_view:false, can_create:false, can_edit:false, can_delete:false, scope:'own' }
@@ -84,7 +89,19 @@ export default function Permissions() {
           Super Admin has unrestricted access to every record type and field. Nothing to configure.
         </div>
       ) : loading ? <Spinner /> : (
-        <div className="card mt-5 divide-y divide-line">
+        <>
+          {role?.is_manager && (
+            <div className="card mt-4 p-4">
+              <label className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Activity page</p>
+                  <p className="text-xs text-muted">Daily call/disposition activity report. Super Admin can always see it regardless of this setting.</p>
+                </div>
+                <Check on={role.can_view_activity !== false} onChange={v => saveRole({ can_view_activity: v })} />
+              </label>
+            </div>
+          )}
+          <div className="card mt-4 divide-y divide-line">
           {objectTypes.length === 0 && <p className="p-6 text-sm text-muted">Create a record type first.</p>}
           {objectTypes.map(ot => {
             const p = objPerms[ot.id] || {}
@@ -130,7 +147,8 @@ export default function Permissions() {
               </div>
             )
           })}
-        </div>
+          </div>
+        </>
       )}
     </div>
   )

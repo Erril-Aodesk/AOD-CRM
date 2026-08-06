@@ -7,6 +7,9 @@ export function buildPermissions({ role, objectPerms, fieldPerms }) {
   return {
     isAdmin,
     isManager: !!role?.is_manager || isAdmin,
+    // Super Admin always sees the Activity page; for Managers it's a
+    // per-role toggle (defaults on) set in Permissions.
+    canViewActivity: isAdmin || (!!role?.is_manager && role?.can_view_activity !== false),
     canView:   ot => isAdmin || !!oMap.get(ot)?.can_view,
     canCreate: ot => isAdmin || !!oMap.get(ot)?.can_create,
     canEdit:   ot => isAdmin || !!oMap.get(ot)?.can_edit,
