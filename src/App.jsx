@@ -10,6 +10,7 @@ import RecordDetail from './pages/RecordDetail'
 import Callbacks from './pages/Callbacks'
 import Reports from './pages/Reports'
 import Appointments from './pages/Appointments'
+import Activity from './pages/Activity'
 import ImportExcel from './pages/ImportExcel'
 import ObjectTypes from './pages/admin/ObjectTypes'
 import Permissions from './pages/admin/Permissions'
@@ -46,6 +47,7 @@ export default function App() {
         <Route path="callbacks" element={<Callbacks />} />
         <Route path="reports" element={<RequireManager><Reports /></RequireManager>} />
         <Route path="appointments" element={<RequireManager><Appointments /></RequireManager>} />
+        <Route path="activity" element={<RequireManager><Activity /></RequireManager>} />
         <Route path="import" element={<ImportExcel />} />
         <Route path="admin/objects" element={<RequireAdmin><ObjectTypes /></RequireAdmin>} />
         <Route path="admin/permissions" element={<RequireAdmin><Permissions /></RequireAdmin>} />
