@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import Modal from '../../components/Modal'
-import { Plus, Trash2, Database, Star, Pencil, Copy } from 'lucide-react'
+import { Plus, Trash2, Database, Star, Pencil, Copy, ChevronUp, ChevronDown } from 'lucide-react'
 
 const TYPES = ['text','textarea','number','currency','date','datetime','boolean','select','multiselect','email','phone']
 const slugify = s => s.toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')
@@ -104,6 +104,17 @@ export default function ObjectTypes() {
     await refresh()
     setSel(newOt.id)
   }
+  // Renumbers the whole list to sequential indices rather than swapping raw
+  // sort_order values, so stale/duplicate values from older data can't leave
+  // a move looking like it did nothing.
+  const moveField = async (index, dir) => {
+    const other = index + dir
+    if (other < 0 || other >= defs.length) return
+    const reordered = [...defs]
+    ;[reordered[index], reordered[other]] = [reordered[other], reordered[index]]
+    await Promise.all(reordered.map((f, i) => supabase.from('field_definitions').update({ sort_order: i }).eq('id', f.id)))
+    await refresh()
+  }
   const setStatus = async (f) => {
     // clear existing status field for this type, then set this one
     await supabase.from('field_definitions').update({ is_status_field: false })
@@ -156,10 +167,22 @@ export default function ObjectTypes() {
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[560px]">
-                <thead><tr><th className="th">Label</th><th className="th">Key</th><th className="th">Type</th><th className="th">Status field</th><th className="th"></th></tr></thead>
+                <thead><tr><th className="th w-8"></th><th className="th">Label</th><th className="th">Key</th><th className="th">Type</th><th className="th">Status field</th><th className="th"></th></tr></thead>
                 <tbody>
-                  {defs.map(f => (
+                  {defs.map((f, i) => (
                     <tr key={f.id}>
+                      <td className="td">
+                        <div className="flex flex-col">
+                          <button className="text-muted hover:text-ink disabled:opacity-30 disabled:cursor-not-allowed"
+                            disabled={i === 0} title="Move up" onClick={() => moveField(i, -1)}>
+                            <ChevronUp size={14} />
+                          </button>
+                          <button className="text-muted hover:text-ink disabled:opacity-30 disabled:cursor-not-allowed"
+                            disabled={i === defs.length - 1} title="Move down" onClick={() => moveField(i, 1)}>
+                            <ChevronDown size={14} />
+                          </button>
+                        </div>
+                      </td>
                       <td className="td font-medium">{f.label}{f.is_required && <span className="text-danger"> *</span>}</td>
                       <td className="td text-muted">{f.key}</td>
                       <td className="td"><span className="chip bg-brand-soft text-brand-dark">{f.field_type}</span></td>
