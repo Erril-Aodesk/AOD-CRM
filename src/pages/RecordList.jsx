@@ -51,9 +51,14 @@ export default function RecordList() {
   const nameField = matchField(allFieldDefs, { keys: ['name', 'full_name', 'contact_name', 'lead_name'] })
   const companyField = matchField(allFieldDefs, { keys: ['company', 'business', 'business_name', 'company_name'] })
   const phoneField = matchField(allFieldDefs, { type: 'phone', keys: ['phone', 'phone_number', 'mobile'] })
+  // Free-text fields that are still worth filtering on even though they're
+  // not a `select` type — options are populated from distinct values already
+  // present in the loaded records, same as any other filter.
+  const FILTERABLE_TEXT_FIELDS = ['industry', 'state']
   const filterableFields = fields.filter(f =>
     f.object_type_id === objectTypeId && perms?.fieldVisible(f.id) &&
-    (f.field_type === 'select' || f.is_status_field || f.key?.toLowerCase() === 'industry' || f.label?.toLowerCase() === 'industry')
+    (f.field_type === 'select' || f.is_status_field ||
+      FILTERABLE_TEXT_FIELDS.includes(f.key?.toLowerCase()) || FILTERABLE_TEXT_FIELDS.includes(f.label?.toLowerCase()))
   ).sort((a, b) => a.sort_order - b.sort_order)
 
   const fieldValues = (r, field) => {
