@@ -3,7 +3,11 @@ import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { coerceDefaultValue } from '../components/DynamicField'
+import { matchField } from '../lib/fieldMatch'
+import { fetchAllPages } from '../lib/fetchAllPages'
 import { Upload, CheckCircle2 } from 'lucide-react'
+
+const normalizePhone = (v) => String(v ?? '').replace(/[^0-9]/g, '')
 
 export default function ImportExcel() {
   const { objectTypes, fields, perms, profile } = useAuth()
@@ -38,7 +42,26 @@ export default function ImportExcel() {
   const runImport = async () => {
     setBusy(true)
     const ot = objectTypes.find(o => o.id === otId)
-    const payload = rows.map(row => {
+
+    // Duplicate check is keyed on whichever field is the phone field for this
+    // record type, and only runs if that field is actually mapped to a column.
+    const phoneField = matchField(defs, { type: 'phone', keys: ['phone', 'phone_number', 'mobile'] })
+    const phoneKey = phoneField && map[phoneField.key] ? phoneField.key : null
+
+    const seenPhones = new Set()
+    if (phoneKey) {
+      // Paginated so the check covers every existing record, not just the
+      // first 1000 (see fetchAllPages — same cap issue as everywhere else).
+      const existing = await fetchAllPages(
+        () => supabase.from('records').select(`value:data->>${phoneKey}`).eq('object_type_id', otId),
+        r => r.value
+      )
+      existing.forEach(v => { const n = normalizePhone(v); if (n) seenPhones.add(n) })
+    }
+
+    const payload = []
+    let duplicates = 0
+    rows.forEach(row => {
       const data = {}
       defs.forEach(f => {
         const h = map[f.key]
@@ -53,15 +76,28 @@ export default function ImportExcel() {
         }
         if (val !== undefined && val !== '') data[f.key] = val
       })
-      return { org_id: ot.org_id, object_type_id: otId, owner_id: ot.default_agent_id || profile.id, created_by: profile.id, data }
+
+      if (phoneKey && data[phoneKey]) {
+        const n = normalizePhone(data[phoneKey])
+        // Rows with no digits at all can't be compared, so they're never
+        // treated as duplicates. Otherwise also catch duplicates within the
+        // file itself, not just against records already in the database.
+        if (n) {
+          if (seenPhones.has(n)) { duplicates++; return }
+          seenPhones.add(n)
+        }
+      }
+
+      payload.push({ org_id: ot.org_id, object_type_id: otId, owner_id: ot.default_agent_id || profile.id, created_by: profile.id, data })
     })
+
     // insert in chunks of 500
     let ok = 0, fail = 0
     for (let i = 0; i < payload.length; i += 500) {
       const { error, count } = await supabase.from('records').insert(payload.slice(i, i+500), { count: 'exact' })
       if (error) fail += payload.slice(i, i+500).length; else ok += (count ?? payload.slice(i,i+500).length)
     }
-    setBusy(false); setResult({ ok, fail })
+    setBusy(false); setResult({ ok, fail, duplicates })
   }
 
   return (
@@ -110,7 +146,9 @@ export default function ImportExcel() {
 
         {result && (
           <div className="flex items-center gap-2 rounded-lg bg-ok/10 px-3 py-2 text-sm text-ok">
-            <CheckCircle2 size={16} /> Imported {result.ok} records{result.fail ? `, ${result.fail} failed` : ''}.
+            <CheckCircle2 size={16} /> Imported {result.ok} records
+            {result.duplicates ? `, skipped ${result.duplicates} duplicate${result.duplicates === 1 ? '' : 's'} by phone number` : ''}
+            {result.fail ? `, ${result.fail} failed` : ''}.
           </div>
         )}
       </div>
