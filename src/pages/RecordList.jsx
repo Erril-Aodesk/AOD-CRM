@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { FieldValue, FieldInput, PhoneCopyButton, coerceDefaultValue } from '../components/DynamicField'
 import { matchField } from '../lib/fieldMatch'
+import { fetchAllPages } from '../lib/fetchAllPages'
 import Spinner from '../components/Spinner'
 import Modal from '../components/Modal'
 import AppointmentModal from '../components/AppointmentModal'
@@ -66,11 +67,25 @@ export default function RecordList() {
     if (v === null || v === undefined || v === '') return []
     return Array.isArray(v) ? v : [v]
   }
-  const filterOptions = (field) => {
-    const set = new Set()
-    rows?.forEach(r => fieldValues(r, field).forEach(v => set.add(v)))
-    return [...set].sort()
-  }
+  // Select/status options come straight from the field's own admin-defined
+  // list — always complete, no query needed. Free-text filterable fields
+  // (Industry, State) have no fixed list, so their options are fetched from
+  // every record of this type below — deriving them from `rows` instead
+  // would silently miss anything past Supabase's 1000-row response cap.
+  const [textFilterOptions, setTextFilterOptions] = useState({})
+  const filterOptions = (field) =>
+    (field.field_type === 'select' || field.is_status_field) ? (field.options || []) : (textFilterOptions[field.id] || [])
+
+  useEffect(() => {
+    const textFields = filterableFields.filter(f => f.field_type !== 'select' && !f.is_status_field)
+    if (textFields.length === 0) { setTextFilterOptions({}); return }
+    let cancelled = false
+    Promise.all(textFields.map(f =>
+      fetchAllPages(() => supabase.from('records').select(`value:data->>${f.key}`).eq('object_type_id', objectTypeId), r => r.value)
+        .then(values => [f.id, [...new Set(values.filter(Boolean))].sort()])
+    )).then(entries => { if (!cancelled) setTextFilterOptions(Object.fromEntries(entries)) })
+    return () => { cancelled = true }
+  }, [objectTypeId, filterableFields.map(f => f.id).join(',')])
   const activeFilterCount = filterableFields.filter(f => filterValues[f.id]).length
   const isRecordToday = (r) => {
     if (!callbackField) return false
