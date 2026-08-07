@@ -39,36 +39,46 @@ export default function ImportExcel() {
     setResult(null)
   }
 
+  const isBlank = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)
+
   const runImport = async () => {
     setBusy(true)
     const ot = objectTypes.find(o => o.id === otId)
 
     // Duplicate check is keyed on whichever field is the phone field for this
     // record type, and only runs if that field is actually mapped to a column.
-    // Duplicates are skipped, never merged into the existing record — a prior
-    // merge implementation reset Status (and any other already-filled field)
-    // to whatever the sheet's default/blank coercion produced, because
-    // building `data` below applies a field's default_value to ANY blank or
-    // unmapped cell regardless of import intent, which is only safe for
-    // brand-new records, not for writing into ones that already exist.
     const phoneField = matchField(defs, { type: 'phone', keys: ['phone', 'phone_number', 'mobile'] })
     const phoneKey = phoneField && map[phoneField.key] ? phoneField.key : null
+    const statusField = defs.find(f => f.is_status_field)
 
-    const seenPhones = new Set()
+    // recordId -> normalized phone, for every existing record of this type.
+    // Paginated so the check covers everything, not just the first 1000.
+    const phoneToId = new Map()
     if (phoneKey) {
-      // Paginated so the check covers every existing record, not just the
-      // first 1000 (see fetchAllPages — same cap issue as everywhere else).
       const existing = await fetchAllPages(
-        () => supabase.from('records').select(`value:data->>${phoneKey}`).eq('object_type_id', otId),
-        r => r.value
+        () => supabase.from('records').select(`id, value:data->>${phoneKey}`).eq('object_type_id', otId)
       )
-      existing.forEach(v => { const n = normalizePhone(v); if (n) seenPhones.add(n) })
+      existing.forEach(r => { const n = normalizePhone(r.value); if (n) phoneToId.set(n, r.id) })
     }
 
     const payload = []
+    const mergeGroups = new Map() // existing record id -> array of explicit-only data objects
+    const fileSeenPhones = new Set()
     let duplicates = 0
+
     rows.forEach(row => {
-      const data = {}
+      // Full data, WITH default_value fallback — used only when this row
+      // turns out to be a brand-new record (e.g. Status defaults to "New").
+      const fullData = {}
+      // Explicit-only data, built alongside fullData: never includes the
+      // status field (excluded categorically, no exceptions), and never
+      // includes a default_value fallback for anything else either — only
+      // a column that was actually mapped AND has a real, non-blank cell
+      // value for this row counts. This is what a duplicate gets merged
+      // from, so an unmapped/blank cell can never masquerade as real input
+      // and overwrite something already on the existing record.
+      const explicitData = {}
+
       defs.forEach(f => {
         const h = map[f.key]
         let val = h ? row[h] : undefined
@@ -76,34 +86,70 @@ export default function ImportExcel() {
           if (f.field_type === 'number' || f.field_type === 'currency') val = val === '' ? '' : Number(val)
           if (f.field_type === 'boolean') val = ['true','yes','1','y'].includes(String(val).toLowerCase())
         }
-        if (val === undefined || val === '') {
-          const dv = coerceDefaultValue(f)
-          if (dv !== undefined) val = dv
+
+        if (h && val !== undefined && val !== '' && f.id !== statusField?.id) {
+          explicitData[f.key] = val
         }
-        if (val !== undefined && val !== '') data[f.key] = val
+
+        let fullVal = val
+        if (fullVal === undefined || fullVal === '') {
+          const dv = coerceDefaultValue(f)
+          if (dv !== undefined) fullVal = dv
+        }
+        if (fullVal !== undefined && fullVal !== '') fullData[f.key] = fullVal
       })
 
-      if (phoneKey && data[phoneKey]) {
-        const n = normalizePhone(data[phoneKey])
-        // Rows with no digits at all can't be compared, so they're never
-        // treated as duplicates. Otherwise also catch duplicates within the
-        // file itself, not just against records already in the database.
-        if (n) {
-          if (seenPhones.has(n)) { duplicates++; return }
-          seenPhones.add(n)
-        }
+      const n = phoneKey && fullData[phoneKey] ? normalizePhone(fullData[phoneKey]) : ''
+      if (n && phoneToId.has(n)) {
+        // Matches a record already in the database — merge the explicit-only
+        // data into it instead of inserting a duplicate.
+        const id = phoneToId.get(n)
+        if (!mergeGroups.has(id)) mergeGroups.set(id, [])
+        mergeGroups.get(id).push(explicitData)
+        return
       }
-
-      payload.push({ org_id: ot.org_id, object_type_id: otId, owner_id: ot.default_agent_id || profile.id, created_by: profile.id, data })
+      if (n && fileSeenPhones.has(n)) {
+        // Same phone appears twice in this file, neither matching an
+        // existing record — nothing to merge into yet, so just skip the repeat.
+        duplicates++
+        return
+      }
+      if (n) fileSeenPhones.add(n)
+      payload.push({ org_id: ot.org_id, object_type_id: otId, owner_id: ot.default_agent_id || profile.id, created_by: profile.id, data: fullData })
     })
 
-    // insert in chunks of 500
+    // insert new records in chunks of 500
     let ok = 0, fail = 0
     for (let i = 0; i < payload.length; i += 500) {
       const { error, count } = await supabase.from('records').insert(payload.slice(i, i+500), { count: 'exact' })
       if (error) fail += payload.slice(i, i+500).length; else ok += (count ?? payload.slice(i,i+500).length)
     }
-    setBusy(false); setResult({ ok, fail, duplicates })
+
+    // Fill in only whatever's currently blank on each matched existing
+    // record — anything already filled in is left alone, "Assigned to"
+    // (owner_id) is never touched by an import, and Status can never appear
+    // here at all since it was excluded from explicitData above.
+    let updated = 0
+    if (mergeGroups.size > 0) {
+      const ids = [...mergeGroups.keys()]
+      const { data: existingRecords } = await supabase.from('records').select('id, data').in('id', ids)
+      const currentById = new Map((existingRecords || []).map(r => [r.id, { ...(r.data || {}) }]))
+      for (const [id, incomingRows] of mergeGroups) {
+        const merged = currentById.get(id) || {}
+        let changed = false
+        incomingRows.forEach(incoming => {
+          Object.entries(incoming).forEach(([k, v]) => {
+            if (isBlank(merged[k])) { merged[k] = v; changed = true }
+          })
+        })
+        if (changed) {
+          const { error } = await supabase.from('records').update({ data: merged }).eq('id', id)
+          if (!error) updated++
+        }
+      }
+    }
+
+    setBusy(false); setResult({ ok, fail, duplicates, updated })
   }
 
   return (
@@ -152,8 +198,9 @@ export default function ImportExcel() {
 
         {result && (
           <div className="flex items-center gap-2 rounded-lg bg-ok/10 px-3 py-2 text-sm text-ok">
-            <CheckCircle2 size={16} /> Imported {result.ok} records
-            {result.duplicates ? `, skipped ${result.duplicates} duplicate${result.duplicates === 1 ? '' : 's'} by phone number` : ''}
+            <CheckCircle2 size={16} /> Imported {result.ok} new record{result.ok === 1 ? '' : 's'}
+            {result.updated ? `, filled in missing details (never Status) on ${result.updated} existing record${result.updated === 1 ? '' : 's'} matched by phone number` : ''}
+            {result.duplicates ? `, skipped ${result.duplicates} duplicate${result.duplicates === 1 ? '' : 's'} within the file` : ''}
             {result.fail ? `, ${result.fail} failed` : ''}.
           </div>
         )}
