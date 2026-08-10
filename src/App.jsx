@@ -1,20 +1,25 @@
+import { lazy } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import Spinner from './components/Spinner'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import AcceptInvite from './pages/AcceptInvite'
-import Dashboard from './pages/Dashboard'
-import RecordList from './pages/RecordList'
-import RecordDetail from './pages/RecordDetail'
-import Callbacks from './pages/Callbacks'
-import Reports from './pages/Reports'
-import Appointments from './pages/Appointments'
-import Activity from './pages/Activity'
-import ImportExcel from './pages/ImportExcel'
-import ObjectTypes from './pages/admin/ObjectTypes'
-import Permissions from './pages/admin/Permissions'
-import UsersAdmin from './pages/admin/Users'
+
+// Routed pages are code-split so the initial bundle only ships what a fresh
+// login actually needs — Reports (recharts) and ImportExcel (xlsx) are large
+// libraries that previously loaded on every visit even to the Dashboard.
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const RecordList = lazy(() => import('./pages/RecordList'))
+const RecordDetail = lazy(() => import('./pages/RecordDetail'))
+const Callbacks = lazy(() => import('./pages/Callbacks'))
+const Reports = lazy(() => import('./pages/Reports'))
+const Appointments = lazy(() => import('./pages/Appointments'))
+const Activity = lazy(() => import('./pages/Activity'))
+const ImportExcel = lazy(() => import('./pages/ImportExcel'))
+const ObjectTypes = lazy(() => import('./pages/admin/ObjectTypes'))
+const Permissions = lazy(() => import('./pages/admin/Permissions'))
+const UsersAdmin = lazy(() => import('./pages/admin/Users'))
 
 function RequireAdmin({ children }) {
   const { perms } = useAuth()

@@ -25,47 +25,50 @@ export default function Dashboard() {
   const [appointmentCount, setAppointmentCount] = useState(0)
   const visible = objectTypes.filter(ot => perms?.canView(ot.id))
 
+  // The three sections below are independent of each other, so each runs as
+  // its own fire-and-forget chain instead of one sequential await-chain —
+  // they load in parallel and each tile populates as soon as its own query
+  // resolves, rather than the whole page waiting on the slowest of the three.
   useEffect(() => {
-    (async () => {
-      const now = new Date()
-      const pad = (n) => String(n).padStart(2, '0')
-      // callback_date_time is stored as a naive "YYYY-MM-DDTHH:mm" string (the
-      // raw value of a datetime-local input, no timezone) — this boundary is
-      // built in the same format so a lexical <= comparison matches "due
-      // today or earlier" without pulling every callback row to filter in JS.
-      const endOfToday = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T23:59`
-      const callbackTypes = visible.filter(ot => fields.some(f => f.object_type_id === ot.id && f.key === 'callback_date_time'))
-      const results = await Promise.all(callbackTypes.map(ot =>
-        supabase.from('records').select('id', { count: 'exact', head: true })
-          .eq('object_type_id', ot.id)
-          .not('data->>callback_date_time', 'is', null)
-          .lte('data->>callback_date_time', endOfToday)
-      ))
-      const due = results.reduce((n, { count }) => n + (count || 0), 0)
-      setDueCount(due)
+    const now = new Date()
+    const pad = (n) => String(n).padStart(2, '0')
+    // callback_date_time is stored as a naive "YYYY-MM-DDTHH:mm" string (the
+    // raw value of a datetime-local input, no timezone) — this boundary is
+    // built in the same format so a lexical <= comparison matches "due
+    // today or earlier" without pulling every callback row to filter in JS.
+    const endOfToday = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T23:59`
+    const callbackTypes = visible.filter(ot => fields.some(f => f.object_type_id === ot.id && f.key === 'callback_date_time'))
+    Promise.all(callbackTypes.map(ot =>
+      supabase.from('records').select('id', { count: 'exact', head: true })
+        .eq('object_type_id', ot.id)
+        .not('data->>callback_date_time', 'is', null)
+        .lte('data->>callback_date_time', endOfToday)
+    )).then(results => {
+      setDueCount(results.reduce((n, { count }) => n + (count || 0), 0))
+    })
 
-      // Per-status counts, per record type that has a status field. Each count comes
-      // from a count: 'exact' query (see aggregateFieldCounts) so it's accurate even
-      // when a type has more than Supabase's 1000-row response cap worth of records.
-      const withStatus = visible
-        .map(ot => ({ ot, statusField: fields.find(f => f.object_type_id === ot.id && f.is_status_field) }))
-        .filter(x => x.statusField)
-      const sections = await Promise.all(withStatus.map(async ({ ot, statusField }) => {
-        const data = await aggregateFieldCounts(ot.id, statusField)
-        const byName = new Map(data.map(d => [d.name.toLowerCase(), d]))
-        const large = PROMINENT_STATUSES.map(name => byName.get(name.toLowerCase())).filter(Boolean)
-        const largeNames = new Set(large.map(d => d.name.toLowerCase()))
-        const small = data.filter(d => !largeNames.has(d.name.toLowerCase()) && d.count > 0)
-        return { ot, large, small }
-      }))
+    // Per-status counts, per record type that has a status field. Each count comes
+    // from a count: 'exact' query (see aggregateFieldCounts) so it's accurate even
+    // when a type has more than Supabase's 1000-row response cap worth of records.
+    const withStatus = visible
+      .map(ot => ({ ot, statusField: fields.find(f => f.object_type_id === ot.id && f.is_status_field) }))
+      .filter(x => x.statusField)
+    Promise.all(withStatus.map(async ({ ot, statusField }) => {
+      const data = await aggregateFieldCounts(ot.id, statusField)
+      const byName = new Map(data.map(d => [d.name.toLowerCase(), d]))
+      const large = PROMINENT_STATUSES.map(name => byName.get(name.toLowerCase())).filter(Boolean)
+      const largeNames = new Set(large.map(d => d.name.toLowerCase()))
+      const small = data.filter(d => !largeNames.has(d.name.toLowerCase()) && d.count > 0)
+      return { ot, large, small }
+    })).then(sections => {
       setStatusSections(sections.filter(s => s.large.length > 0 || s.small.length > 0))
+    })
 
-      if (profile?.org_id) {
-        const { count } = await supabase.from('appointments')
-          .select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id)
-        setAppointmentCount(count || 0)
-      }
-    })()
+    if (profile?.org_id) {
+      supabase.from('appointments')
+        .select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id)
+        .then(({ count }) => setAppointmentCount(count || 0))
+    }
   }, [objectTypes.length, fields.length, profile?.org_id])
 
   return (

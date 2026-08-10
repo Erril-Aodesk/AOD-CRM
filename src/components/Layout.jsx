@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import NotificationBell from './NotificationBell'
+import Spinner from './Spinner'
 import { LayoutGrid, PhoneCall, Upload, Settings, Users, Database,
          Shield, LogOut, Menu, X, BarChart3, CalendarCheck, Activity } from 'lucide-react'
 
@@ -104,7 +105,9 @@ export default function Layout() {
             <NotificationBell />
           </div>
         </header>
-        <main className="min-w-0 flex-1 p-4 sm:p-6"><Outlet /></main>
+        <main className="min-w-0 flex-1 p-4 sm:p-6">
+          <Suspense fallback={<Spinner label="Loading…" />}><Outlet /></Suspense>
+        </main>
       </div>
     </div>
   )
