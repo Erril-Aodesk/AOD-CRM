@@ -23,6 +23,10 @@ export default function RecordList() {
   const nav = useNavigate()
   const [searchParams] = useSearchParams()
   const [kanbanData, setKanbanData] = useState(null)
+  // qInput is what the search box shows immediately; q (debounced, 300ms) is
+  // what actually drives queries — at 100k+ rows, querying on every keystroke
+  // instead of once you pause typing is a lot of avoidable load.
+  const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
   const [deleteAll, setDeleteAll] = useState(false)
   const [toast, setToast] = useState('')
@@ -34,7 +38,6 @@ export default function RecordList() {
   const [page, setPage] = useState(1)
   const [listRows, setListRows] = useState(null)
   const [listCount, setListCount] = useState(0)
-  const [totalCount, setTotalCount] = useState(0)
   const [appointmentState, setAppointmentState] = useState(null)
 
   const ot = objectTypes.find(o => o.id === objectTypeId)
@@ -129,8 +132,9 @@ export default function RecordList() {
     }
   }, [colWidthsKey])
 
-  // listCount/totalCount come from count: 'exact' queries, which return an accurate
-  // total straight from Postgres regardless of Supabase's 1000-row response cap.
+  // listCount comes from the same count: 'exact' query that loads the current
+  // page, so it's an accurate total straight from Postgres — never capped at
+  // Supabase's 1000-row response limit, and never a second, separate request.
   const totalPages = Math.max(1, Math.ceil(listCount / pageSize))
   const currentPage = Math.min(page, totalPages)
 
@@ -189,15 +193,14 @@ export default function RecordList() {
       .then(({ data, count }) => { setListRows(data || []); setListCount(count ?? 0) })
   }
 
-  const loadTotalCount = () =>
-    supabase.from('records').select('id', { count: 'exact', head: true }).eq('object_type_id', objectTypeId)
-      .then(({ count }) => setTotalCount(count ?? 0))
-
   useEffect(() => {
     setPage(1)
   }, [objectTypeId])
 
-  useEffect(() => { loadTotalCount() }, [objectTypeId])
+  useEffect(() => {
+    const t = setTimeout(() => { setQ(qInput); setPage(1) }, 300)
+    return () => clearTimeout(t)
+  }, [qInput])
 
   useEffect(() => {
     loadListRows()
@@ -218,7 +221,6 @@ export default function RecordList() {
     setToast(`Deleted ${count} record${count === 1 ? '' : 's'}`)
     setPage(1)
     loadListRows()
-    loadTotalCount()
     if (view === 'kanban') loadKanbanData()
   }
 
@@ -280,7 +282,7 @@ export default function RecordList() {
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold">{ot.name}</h1>
-        <span className="chip bg-brand-soft text-brand-dark">{totalCount}</span>
+        <span className="chip bg-brand-soft text-brand-dark">{listCount}</span>
         <div className="inline-flex rounded-lg border border-line p-0.5">
           <button className={`rounded-md px-2.5 py-1.5 ${view === 'list' ? 'bg-brand text-white' : 'text-muted hover:text-ink'}`}
             title="List view" onClick={() => setView('list')}><List size={15} /></button>
@@ -290,8 +292,8 @@ export default function RecordList() {
         <div className="ml-auto flex items-center gap-2">
           <div className="relative">
             <Search size={15} className="pointer-events-none absolute left-2.5 top-2.5 text-muted" />
-            <input className="input pl-8 w-44 sm:w-56" placeholder="Search name, company, phone…" value={q}
-              onChange={e => { setQ(e.target.value); setPage(1) }} />
+            <input className="input pl-8 w-44 sm:w-56" placeholder="Search name, company, phone…" value={qInput}
+              onChange={e => setQInput(e.target.value)} />
           </div>
           {perms?.canCreate(objectTypeId) &&
             <button className="btn-primary" onClick={() => setCreating(true)}><Plus size={16} /> New</button>}
