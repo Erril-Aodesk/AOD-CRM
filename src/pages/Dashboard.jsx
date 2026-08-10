@@ -28,22 +28,20 @@ export default function Dashboard() {
   useEffect(() => {
     (async () => {
       const now = new Date()
-      const isDueOrOverdue = (raw) => {
-        if (!raw) return false
-        const dt = new Date(raw)
-        if (isNaN(dt)) return false
-        return dt < now ||
-          (dt.getFullYear() === now.getFullYear() && dt.getMonth() === now.getMonth() && dt.getDate() === now.getDate())
-      }
+      const pad = (n) => String(n).padStart(2, '0')
+      // callback_date_time is stored as a naive "YYYY-MM-DDTHH:mm" string (the
+      // raw value of a datetime-local input, no timezone) — this boundary is
+      // built in the same format so a lexical <= comparison matches "due
+      // today or earlier" without pulling every callback row to filter in JS.
+      const endOfToday = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T23:59`
       const callbackTypes = visible.filter(ot => fields.some(f => f.object_type_id === ot.id && f.key === 'callback_date_time'))
       const results = await Promise.all(callbackTypes.map(ot =>
-        supabase.from('records')
-          .select('callback_date_time:data->>callback_date_time')
+        supabase.from('records').select('id', { count: 'exact', head: true })
           .eq('object_type_id', ot.id)
           .not('data->>callback_date_time', 'is', null)
+          .lte('data->>callback_date_time', endOfToday)
       ))
-      const due = results.reduce((n, { data }) =>
-        n + (data || []).filter(r => isDueOrOverdue(r.callback_date_time)).length, 0)
+      const due = results.reduce((n, { count }) => n + (count || 0), 0)
       setDueCount(due)
 
       // Per-status counts, per record type that has a status field. Each count comes

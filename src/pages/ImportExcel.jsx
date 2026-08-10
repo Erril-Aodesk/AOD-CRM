@@ -51,14 +51,27 @@ export default function ImportExcel() {
     const phoneKey = phoneField && map[phoneField.key] ? phoneField.key : null
     const statusField = defs.find(f => f.is_status_field)
 
-    // recordId -> normalized phone, for every existing record of this type.
-    // Paginated so the check covers everything, not just the first 1000.
+    // recordId -> normalized phone, looked up only for the phone numbers in
+    // this file (via the find_ids_by_normalized_phone RPC) rather than paging
+    // through every existing record of this type — this scales with the size
+    // of the file being imported, not the size of the table.
     const phoneToId = new Map()
     if (phoneKey) {
-      const existing = await fetchAllPages(
-        () => supabase.from('records').select(`id, value:data->>${phoneKey}`).eq('object_type_id', otId)
-      )
-      existing.forEach(r => { const n = normalizePhone(r.value); if (n) phoneToId.set(n, r.id) })
+      const filePhones = [...new Set(rows.map(row => normalizePhone(row[map[phoneKey]])).filter(Boolean))]
+      if (filePhones.length > 0) {
+        const { data, error } = await supabase.rpc('find_ids_by_normalized_phone', {
+          p_object_type_id: otId, p_field_key: phoneKey, p_phones: filePhones
+        })
+        if (!error && data) {
+          data.forEach(r => phoneToId.set(r.phone_digits, r.id))
+        } else {
+          // Fallback if the RPC hasn't been deployed yet — same result, slower.
+          const existing = await fetchAllPages(
+            () => supabase.from('records').select(`id, value:data->>${phoneKey}`).eq('object_type_id', otId)
+          )
+          existing.forEach(r => { const n = normalizePhone(r.value); if (n) phoneToId.set(n, r.id) })
+        }
+      }
     }
 
     const payload = []

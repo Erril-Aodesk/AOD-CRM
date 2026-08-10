@@ -12,13 +12,17 @@ import { Plus, Search, Trash2, Check, List, LayoutGrid, ChevronLeft, ChevronRigh
 
 const MIN_COL_WIDTH = 90
 const DEFAULT_COL_WIDTH = 160
+// Kanban groups by status via one capped, indexed query per column instead of
+// loading the whole table client-side — this is what keeps it usable well
+// past the point where "fetch everything and group in JS" stops scaling.
+const KANBAN_CAP = 100
 
 export default function RecordList() {
   const { objectTypeId } = useParams()
   const { objectTypes, fields, perms, profile } = useAuth()
   const nav = useNavigate()
   const [searchParams] = useSearchParams()
-  const [rows, setRows] = useState(null)
+  const [kanbanData, setKanbanData] = useState(null)
   const [q, setQ] = useState('')
   const [deleteAll, setDeleteAll] = useState(false)
   const [toast, setToast] = useState('')
@@ -43,6 +47,8 @@ export default function RecordList() {
           .sort((a, b) => a.sort_order - b.sort_order),
     [fields, objectTypeId, perms])
   const statusField = fields.find(f => f.object_type_id === objectTypeId && f.is_status_field)
+  const statusKey = statusField?.key
+  const statusOptions = statusField?.options || []
   const callbackField = fields.find(f => f.object_type_id === objectTypeId && f.key === 'callback_date_time')
   // Full field set (not just show_in_list columns) — AppointmentModal needs to
   // find fields like position/address/company that may not be list columns.
@@ -62,16 +68,11 @@ export default function RecordList() {
       FILTERABLE_TEXT_FIELDS.includes(f.key?.toLowerCase()) || FILTERABLE_TEXT_FIELDS.includes(f.label?.toLowerCase()))
   ).sort((a, b) => a.sort_order - b.sort_order)
 
-  const fieldValues = (r, field) => {
-    const v = r.data[field.key]
-    if (v === null || v === undefined || v === '') return []
-    return Array.isArray(v) ? v : [v]
-  }
   // Select/status options come straight from the field's own admin-defined
   // list — always complete, no query needed. Free-text filterable fields
-  // (Industry, State) have no fixed list, so their options are fetched from
-  // every record of this type below — deriving them from `rows` instead
-  // would silently miss anything past Supabase's 1000-row response cap.
+  // (Industry, State) have no fixed list, so their options come from the
+  // distinct_field_values RPC (one grouped query in Postgres) instead of
+  // paging through every record of this type to dedupe client-side.
   const [textFilterOptions, setTextFilterOptions] = useState({})
   const filterOptions = (field) =>
     (field.field_type === 'select' || field.is_status_field) ? (field.options || []) : (textFilterOptions[field.id] || [])
@@ -80,10 +81,13 @@ export default function RecordList() {
     const textFields = filterableFields.filter(f => f.field_type !== 'select' && !f.is_status_field)
     if (textFields.length === 0) { setTextFilterOptions({}); return }
     let cancelled = false
-    Promise.all(textFields.map(f =>
-      fetchAllPages(() => supabase.from('records').select(`value:data->>${f.key}`).eq('object_type_id', objectTypeId), r => r.value)
-        .then(values => [f.id, [...new Set(values.filter(Boolean))].sort()])
-    )).then(entries => { if (!cancelled) setTextFilterOptions(Object.fromEntries(entries)) })
+    Promise.all(textFields.map(async f => {
+      const { data, error } = await supabase.rpc('distinct_field_values', { p_object_type_id: objectTypeId, p_field_key: f.key })
+      if (!error && data) return [f.id, data.map(r => r.value).filter(Boolean)]
+      // Fallback if the RPC hasn't been deployed yet — same result, slower.
+      const values = await fetchAllPages(() => supabase.from('records').select(`value:data->>${f.key}`).eq('object_type_id', objectTypeId), r => r.value)
+      return [f.id, [...new Set(values.filter(Boolean))].sort()]
+    })).then(entries => { if (!cancelled) setTextFilterOptions(Object.fromEntries(entries)) })
     return () => { cancelled = true }
   }, [objectTypeId, filterableFields.map(f => f.id).join(',')])
   const activeFilterCount = filterableFields.filter(f => filterValues[f.id]).length
@@ -126,14 +130,13 @@ export default function RecordList() {
   }, [colWidthsKey])
 
   // listCount/totalCount come from count: 'exact' queries, which return an accurate
-  // total straight from Postgres regardless of Supabase's 1000-row response cap —
-  // unlike `rows` below (used only for Kanban/filter options), they're never capped.
+  // total straight from Postgres regardless of Supabase's 1000-row response cap.
   const totalPages = Math.max(1, Math.ceil(listCount / pageSize))
   const currentPage = Math.min(page, totalPages)
 
   // Search and filters are applied here, server-side, so they run against every
-  // matching record rather than only the first 1000 fetched into `rows`. A
-  // search term goes through the search_records RPC, which also matches the
+  // matching record instead of a client-side slice. A search term goes
+  // through the search_records RPC, which also matches the
   // phone field digits-only so formatting (spaces, dashes, +) never blocks a
   // match — plain .filter('data::text','ilike',…) can't do that comparison.
   const buildListQuery = () => {
@@ -154,10 +157,29 @@ export default function RecordList() {
     return query
   }
 
-  const loadRows = () =>
-    supabase.from('records').select('*').eq('object_type_id', objectTypeId)
-      .order('created_at', { ascending: false })
-      .then(({ data }) => setRows(data || []))
+  // One capped, filtered query per status column (plus a "no status" bucket)
+  // instead of loading every record and grouping in JS — each request asks
+  // Postgres for an exact count and only the newest KANBAN_CAP rows, so a
+  // column with 40,000 leads costs the same as one with 40.
+  const buildKanbanColumnQuery = (statusValue) => {
+    let query = buildListQuery()
+    if (statusValue === '__none') {
+      const quoted = statusOptions.map(o => `"${String(o).replace(/"/g, '\\"')}"`).join(',')
+      query = query.or(`data->>${statusKey}.is.null,data->>${statusKey}.not.in.(${quoted})`)
+    } else {
+      query = query.eq(`data->>${statusKey}`, statusValue)
+    }
+    return query.order('created_at', { ascending: false }).range(0, KANBAN_CAP - 1)
+  }
+
+  const loadKanbanData = () => {
+    if (!statusField) return
+    setKanbanData(null)
+    const keys = [...statusOptions, '__none']
+    Promise.all(keys.map(k =>
+      buildKanbanColumnQuery(k).then(({ data, count }) => [k, { records: data || [], count: count ?? 0 }])
+    )).then(entries => setKanbanData(Object.fromEntries(entries)))
+  }
 
   const loadListRows = () => {
     setListRows(null)
@@ -172,9 +194,7 @@ export default function RecordList() {
       .then(({ count }) => setTotalCount(count ?? 0))
 
   useEffect(() => {
-    setRows(null)
     setPage(1)
-    loadRows()
   }, [objectTypeId])
 
   useEffect(() => { loadTotalCount() }, [objectTypeId])
@@ -182,6 +202,10 @@ export default function RecordList() {
   useEffect(() => {
     loadListRows()
   }, [objectTypeId, q, filterValues, pageSize, currentPage])
+
+  useEffect(() => {
+    if (view === 'kanban') loadKanbanData()
+  }, [view, objectTypeId, q, filterValues, statusField?.id])
 
   useEffect(() => {
     if (!toast) return
@@ -192,10 +216,10 @@ export default function RecordList() {
   const handleDeletedAll = (count) => {
     setDeleteAll(false)
     setToast(`Deleted ${count} record${count === 1 ? '' : 's'}`)
-    loadRows()
     setPage(1)
     loadListRows()
     loadTotalCount()
+    if (view === 'kanban') loadKanbanData()
   }
 
   const widthOf = (fieldId) => colWidths[fieldId] ?? DEFAULT_COL_WIDTH
@@ -229,36 +253,28 @@ export default function RecordList() {
     const newData = { ...record.data, [field.key]: value }
     const { error } = await supabase.from('records').update({ data: newData }).eq('id', record.id)
     if (error) { alert(error.message); return false }
-    setRows(rs => rs?.map(r => r.id === record.id ? { ...r, data: newData } : r) ?? rs)
     setListRows(rs => rs?.map(r => r.id === record.id ? { ...r, data: newData } : r) ?? rs)
     return true
   }
 
   if (!ot) return <p className="text-muted">Record type not found or no access.</p>
-  if (rows === null) return <Spinner label={`Loading ${ot.name}…`} />
 
-  // Kanban searches the locally-loaded (capped) rows client-side, so it mirrors
-  // the RPC's two match modes: plain substring, and phone digits-only.
-  const qDigits = q.replace(/[^0-9]/g, '')
-  const matchesSearch = (r) => {
-    if (!q) return true
-    if (JSON.stringify(r.data).toLowerCase().includes(q.toLowerCase())) return true
-    if (qDigits && phoneField) {
-      const phoneDigits = String(r.data[phoneField.key] ?? '').replace(/[^0-9]/g, '')
-      if (phoneDigits.includes(qDigits)) return true
-    }
-    return false
-  }
-  const filtered = rows.filter(matchesSearch).filter(r => filterableFields.every(f => {
-    const sel = filterValues[f.id]
-    return !sel || fieldValues(r, f).includes(sel)
-  }))
-
-  const statusOptions = statusField?.options || []
-  const kanbanColumns = statusField
-    ? [...statusOptions.map(o => ({ key: o, label: o, records: filtered.filter(r => r.data[statusField.key] === o).sort(byPriority) })),
-       { key: '__none', label: '—', records: filtered.filter(r => !statusOptions.includes(r.data[statusField.key])).sort(byPriority) }]
+  const columnFromBucket = (key, label, bucket) => ({
+    key, label, count: bucket.count, capped: bucket.count > bucket.records.length,
+    records: [...bucket.records].sort(byPriority)
+  })
+  const kanbanColumns = statusField && kanbanData
+    ? [...statusOptions.map(o => columnFromBucket(o, o, kanbanData[o] || { records: [], count: 0 })),
+       columnFromBucket('__none', '—', kanbanData.__none || { records: [], count: 0 })]
     : null
+
+  const showColumnInList = (statusValue) => {
+    if (statusValue !== '__none' && statusField) {
+      setFilterValues(v => ({ ...v, [statusField.id]: statusValue }))
+      setPage(1)
+    }
+    setView('list')
+  }
 
   return (
     <div>
@@ -302,7 +318,12 @@ export default function RecordList() {
 
       {view === 'kanban' ? (
         statusField ? (
-          <KanbanBoard columns={kanbanColumns} cols={cols.slice(0, 3)} objectTypeId={objectTypeId} nav={nav} isToday={isRecordToday} />
+          kanbanColumns === null ? (
+            <Spinner label="Loading board…" />
+          ) : (
+            <KanbanBoard columns={kanbanColumns} cols={cols.slice(0, 3)} objectTypeId={objectTypeId} nav={nav}
+              isToday={isRecordToday} onSeeMore={showColumnInList} />
+          )
         ) : (
           <div className="card p-8 text-center text-sm text-muted">
             No status field is set for {ot.name}. Mark one as the status field in Record types to use Kanban view.
@@ -410,7 +431,6 @@ export default function RecordList() {
           onClose={() => { appointmentState.revert(); setAppointmentState(null) }}
           onBooked={newData => {
             const id = appointmentState.record.id
-            setRows(rs => rs?.map(r => r.id === id ? { ...r, data: newData } : r) ?? rs)
             setListRows(rs => rs?.map(r => r.id === id ? { ...r, data: newData } : r) ?? rs)
             setAppointmentState(null)
             setToast('Appointment booked and sent to manager')
@@ -604,14 +624,14 @@ function DateTimeCell({ value, onSave }) {
   )
 }
 
-function KanbanBoard({ columns, cols, objectTypeId, nav, isToday }) {
+function KanbanBoard({ columns, cols, objectTypeId, nav, isToday, onSeeMore }) {
   return (
     <div className="flex gap-4 overflow-x-auto pb-2">
       {columns.map(col => (
         <div key={col.key} className="w-72 shrink-0">
           <div className="mb-2 flex items-center gap-2 px-1">
             <h3 className="text-sm font-semibold">{col.label}</h3>
-            <span className="chip bg-brand-soft text-brand-dark">{col.records.length}</span>
+            <span className="chip bg-brand-soft text-brand-dark">{col.count}</span>
           </div>
           <div className="space-y-2">
             {col.records.map(r => {
@@ -632,6 +652,11 @@ function KanbanBoard({ columns, cols, objectTypeId, nav, isToday }) {
               )
             })}
             {col.records.length === 0 && <p className="px-1 py-6 text-center text-xs text-muted">No records</p>}
+            {col.capped && col.key !== '__none' && (
+              <button className="btn-outline w-full text-xs" onClick={() => onSeeMore(col.key)}>
+                See all {col.count} in List view
+              </button>
+            )}
           </div>
         </div>
       ))}

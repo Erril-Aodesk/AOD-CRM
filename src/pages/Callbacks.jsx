@@ -15,12 +15,16 @@ export default function Callbacks() {
 
   useEffect(() => {
     if (!perms) return
+    setRows(null)
+    // Sorted and capped server-side (soonest 300 per type) instead of an
+    // unbounded select('*') — that used to silently drop anything past
+    // Supabase's 1000-row response cap once a type had that many callbacks set.
     Promise.all(callbackTypes.map(ot =>
       supabase.from('records').select('*').eq('object_type_id', ot.id)
         .not('data->>callback_date_time', 'is', null)
-        .then(({ data }) => (data || [])
-          .filter(r => r.data.callback_date_time)
-          .map(r => ({ ...r, _ot: ot })))
+        .order('data->>callback_date_time', { ascending: true })
+        .limit(300)
+        .then(({ data }) => (data || []).map(r => ({ ...r, _ot: ot })))
     )).then(results => {
       const all = results.flat().sort((a, b) =>
         new Date(a.data.callback_date_time) - new Date(b.data.callback_date_time))
