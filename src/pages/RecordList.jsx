@@ -15,7 +15,9 @@ const DEFAULT_COL_WIDTH = 160
 // Kanban groups by status via one capped, indexed query per column instead of
 // loading the whole table client-side — this is what keeps it usable well
 // past the point where "fetch everything and group in JS" stops scaling.
-const KANBAN_CAP = 100
+// Kept short since a column's "See all in List view" button is right there
+// for anything beyond a quick glance.
+const KANBAN_CAP = 10
 
 export default function RecordList() {
   const { objectTypeId } = useParams()
