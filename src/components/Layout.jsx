@@ -76,7 +76,7 @@ export default function Layout() {
   )
 
   return (
-    <div className="flex min-h-screen bg-bg">
+    <div className="flex h-screen overflow-hidden bg-bg">
       {/* Desktop sidebar */}
       <aside className="hidden md:flex w-60 shrink-0 border-r border-line bg-surface">
         <SideContent />
@@ -91,7 +91,7 @@ export default function Layout() {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-surface/90 px-4 py-3 backdrop-blur">
+        <header className="shrink-0 flex items-center justify-between border-b border-line bg-surface/90 px-4 py-3 backdrop-blur">
           <button className="btn-ghost md:hidden !px-2" onClick={() => setOpen(o => !o)}>
             {open ? <X size={20} /> : <Menu size={20} />}
           </button>
@@ -105,9 +105,14 @@ export default function Layout() {
             <NotificationBell />
           </div>
         </header>
-        <main className="min-w-0 flex-1 p-4 sm:p-6">
+        {/* Only this pane scrolls — header/footer stay put and the window
+            itself never grows a scrollbar, however long the page content is. */}
+        <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6">
           <Suspense fallback={<Spinner label="Loading…" />}><Outlet /></Suspense>
         </main>
+        <footer className="shrink-0 border-t border-line bg-surface px-4 py-2 text-center text-xs text-muted">
+          Australian Outsource Desk © {new Date().getFullYear()} · Powered by Qwerrilty
+        </footer>
       </div>
     </div>
   )
