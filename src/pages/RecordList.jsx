@@ -18,6 +18,10 @@ const DEFAULT_COL_WIDTH = 160
 // Kept short since a column's "See all in List view" button is right there
 // for anything beyond a quick glance.
 const KANBAN_CAP = 10
+// Ria Other Leads shows Status as plain text in the table instead of the
+// editable dropdown every other record type uses — scoped by name so it
+// doesn't touch any other type's behavior.
+const TEXT_ONLY_STATUS_TYPES = ['Ria Other Leads']
 
 export default function RecordList() {
   const { objectTypeId } = useParams()
@@ -358,7 +362,7 @@ export default function RecordList() {
                       onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}>
                     {cols.map(c => {
                       const editable = perms?.canEdit(objectTypeId) && perms?.fieldEditable(c.id)
-                      if (editable && c.is_status_field) {
+                      if (editable && c.is_status_field && !TEXT_ONLY_STATUS_TYPES.includes(ot.name)) {
                         return <td key={c.id} className="td">
                           <StatusCell field={c} value={r.data[c.key]} onSave={v => saveField(r, c, v)}
                             onAppointment={revert => setAppointmentState({ record: r, revert })} />
