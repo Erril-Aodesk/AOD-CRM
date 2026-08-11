@@ -77,14 +77,16 @@ export default function RecordList() {
   // not a `select` type — options are populated from distinct values already
   // present in the loaded records, same as any other filter.
   const FILTERABLE_TEXT_FIELDS = ['industry', 'state']
+  // Ria Other Leads' Status column is a plain `text` field, not flagged as
+  // is_status_field (that flag would also wire it into Kanban grouping and
+  // the "Appointment" popup, which isn't wanted for free-typed text) — so
+  // it's matched by key, scoped to just this record type, instead.
+  const isTextStatusField = (f) => TEXT_ONLY_STATUS_TYPE_IDS.includes(objectTypeId) && f.key === 'status'
   const filterableFields = fields.filter(f =>
     f.object_type_id === objectTypeId && perms?.fieldVisible(f.id) &&
-    (f.field_type === 'select' || f.is_status_field ||
+    (f.field_type === 'select' || f.is_status_field || isTextStatusField(f) ||
       FILTERABLE_TEXT_FIELDS.includes(f.key?.toLowerCase()) || FILTERABLE_TEXT_FIELDS.includes(f.label?.toLowerCase()))
   ).sort((a, b) => a.sort_order - b.sort_order)
-  // Status is free-typed (not a fixed option list) on Ria Other Leads, so its
-  // filter is a substring text box instead of the usual value dropdown.
-  const isTextStatusFilter = (f) => f.is_status_field && TEXT_ONLY_STATUS_TYPE_IDS.includes(objectTypeId)
 
   // Select/status options come straight from the field's own admin-defined
   // list — always complete, no query needed. Free-text filterable fields
@@ -169,7 +171,7 @@ export default function RecordList() {
     filterableFields.forEach(f => {
       const sel = filterValues[f.id]
       if (!sel) return
-      if (isTextStatusFilter(f)) {
+      if (isTextStatusField(f)) {
         query = query.ilike(`data->>${f.key}`, `%${sel}%`)
       } else {
         query = f.field_type === 'multiselect'
@@ -325,7 +327,7 @@ export default function RecordList() {
 
       {filterableFields.length > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          {filterableFields.map(f => isTextStatusFilter(f) ? (
+          {filterableFields.map(f => isTextStatusField(f) ? (
             <input key={f.id} className="input w-auto min-w-[140px]" placeholder={`Filter ${f.label}…`}
               value={filterInputs[f.id] ?? filterValues[f.id] ?? ''}
               onChange={e => {
@@ -386,7 +388,7 @@ export default function RecordList() {
                       onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}>
                     {cols.map(c => {
                       const editable = perms?.canEdit(objectTypeId) && perms?.fieldEditable(c.id)
-                      if (editable && c.is_status_field && TEXT_ONLY_STATUS_TYPE_IDS.includes(objectTypeId)) {
+                      if (editable && isTextStatusField(c)) {
                         return <td key={c.id} className="td">
                           <NotesCell field={c} value={r.data[c.key]} onSave={v => saveField(r, c, v)} />
                         </td>
