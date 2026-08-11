@@ -386,7 +386,12 @@ export default function RecordList() {
                       onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}>
                     {cols.map(c => {
                       const editable = perms?.canEdit(objectTypeId) && perms?.fieldEditable(c.id)
-                      if (editable && c.is_status_field && !TEXT_ONLY_STATUS_TYPE_IDS.includes(objectTypeId)) {
+                      if (editable && c.is_status_field && TEXT_ONLY_STATUS_TYPE_IDS.includes(objectTypeId)) {
+                        return <td key={c.id} className="td">
+                          <NotesCell field={c} value={r.data[c.key]} onSave={v => saveField(r, c, v)} />
+                        </td>
+                      }
+                      if (editable && c.is_status_field) {
                         return <td key={c.id} className="td">
                           <StatusCell field={c} value={r.data[c.key]} onSave={v => saveField(r, c, v)}
                             onAppointment={revert => setAppointmentState({ record: r, revert })} />
