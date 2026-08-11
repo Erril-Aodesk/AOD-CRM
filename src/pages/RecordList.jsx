@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { FieldValue, FieldInput, PhoneCopyButton, coerceDefaultValue } from '../components/DynamicField'
-import { matchField } from '../lib/fieldMatch'
+import { matchField, resolveStatusField } from '../lib/fieldMatch'
 import { fetchAllPages } from '../lib/fetchAllPages'
 import Spinner from '../components/Spinner'
 import Modal from '../components/Modal'
@@ -18,11 +18,6 @@ const DEFAULT_COL_WIDTH = 160
 // Kept short since a column's "See all in List view" button is right there
 // for anything beyond a quick glance.
 const KANBAN_CAP = 10
-// Ria Other Leads shows Status as plain text in the table instead of the
-// editable dropdown every other record type uses — scoped by id (not name,
-// which can drift if the type is ever renamed) so it doesn't touch any
-// other type's behavior.
-const TEXT_ONLY_STATUS_TYPE_IDS = ['9d0dc1be-9c8e-4e0a-b8bc-cd86ad3cb7b4']
 
 export default function RecordList() {
   const { objectTypeId } = useParams()
@@ -61,6 +56,9 @@ export default function RecordList() {
       (f.is_status_field || perms?.fieldVisible(f.id)))
           .sort((a, b) => a.sort_order - b.sort_order),
     [fields, objectTypeId, perms])
+  // Kanban grouping and the Appointment-popup trigger stay tied to the
+  // strictly-flagged status field only — a type using the free-typed text
+  // fallback (see resolveStatusField) doesn't get pulled into either.
   const statusField = fields.find(f => f.object_type_id === objectTypeId && f.is_status_field)
   const statusKey = statusField?.key
   const statusOptions = statusField?.options || []
@@ -68,6 +66,10 @@ export default function RecordList() {
   // Full field set (not just show_in_list columns) — AppointmentModal needs to
   // find fields like position/address/company that may not be list columns.
   const allFieldDefs = fields.filter(f => f.object_type_id === objectTypeId && perms?.fieldVisible(f.id))
+  // Broader than statusField: falls back to the free-typed text field for
+  // record types like Ria Other Leads — used for filtering and the
+  // Dashboard's ?status= deep link, neither of which need the strict flag.
+  const linkableStatusField = resolveStatusField(objectTypeId, allFieldDefs)
   // Same heuristic the appointment popup uses to find these concepts among
   // this record type's dynamic fields — key/label spellings vary per org.
   const nameField = matchField(allFieldDefs, { keys: ['name', 'full_name', 'contact_name', 'lead_name'] })
@@ -77,11 +79,9 @@ export default function RecordList() {
   // not a `select` type — options are populated from distinct values already
   // present in the loaded records, same as any other filter.
   const FILTERABLE_TEXT_FIELDS = ['industry', 'state']
-  // Ria Other Leads' Status column is a plain `text` field, not flagged as
-  // is_status_field (that flag would also wire it into Kanban grouping and
-  // the "Appointment" popup, which isn't wanted for free-typed text) — so
-  // it's matched by key, scoped to just this record type, instead.
-  const isTextStatusField = (f) => TEXT_ONLY_STATUS_TYPE_IDS.includes(objectTypeId) && f.key === 'status'
+  // True only when linkableStatusField resolved via the free-typed text
+  // fallback (not the strict is_status_field flag) and this is that field.
+  const isTextStatusField = (f) => !f.is_status_field && f.id === linkableStatusField?.id
   const filterableFields = fields.filter(f =>
     f.object_type_id === objectTypeId && perms?.fieldVisible(f.id) &&
     (f.field_type === 'select' || f.is_status_field || isTextStatusField(f) ||
@@ -130,9 +130,9 @@ export default function RecordList() {
   const appliedStatusRef = useRef(null)
   const statusParam = searchParams.get('status')
   const statusSyncKey = `${objectTypeId}::${statusParam || ''}`
-  if (statusField && statusParam && appliedStatusRef.current !== statusSyncKey) {
+  if (linkableStatusField && statusParam && appliedStatusRef.current !== statusSyncKey) {
     appliedStatusRef.current = statusSyncKey
-    setFilterValues(v => ({ ...v, [statusField.id]: statusParam }))
+    setFilterValues(v => ({ ...v, [linkableStatusField.id]: statusParam }))
     setPage(1)
   }
 

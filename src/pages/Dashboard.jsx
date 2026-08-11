@@ -3,7 +3,13 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { aggregateFieldCounts } from '../lib/reportAggregates'
+import { resolveStatusField } from '../lib/fieldMatch'
 import { PhoneCall, Tag, CalendarCheck } from 'lucide-react'
+
+// The "by status" breakdown below shows one record type at a time, switched
+// via a toggle rather than stacking every qualifying type — these are the
+// two types currently in scope for it.
+const STATUS_BREAKDOWN_TYPES = ['BDM Leads', 'Ria Other Leads']
 
 // "Unset" is a synthetic bucket for missing values, not a real status option —
 // there's no dropdown value to filter by, so those tiles link unfiltered.
@@ -24,6 +30,8 @@ export default function Dashboard() {
   const [statusSections, setStatusSections] = useState([])
   const [appointmentCount, setAppointmentCount] = useState(0)
   const visible = objectTypes.filter(ot => perms?.canView(ot.id))
+  const breakdownTypes = STATUS_BREAKDOWN_TYPES.filter(name => visible.some(ot => ot.name === name))
+  const [selectedType, setSelectedType] = useState(STATUS_BREAKDOWN_TYPES[0])
 
   // The three sections below are independent of each other, so each runs as
   // its own fire-and-forget chain instead of one sequential await-chain —
@@ -47,29 +55,32 @@ export default function Dashboard() {
       setDueCount(results.reduce((n, { count }) => n + (count || 0), 0))
     })
 
-    // Per-status counts, per record type that has a status field. Each count comes
-    // from a count: 'exact' query (see aggregateFieldCounts) so it's accurate even
-    // when a type has more than Supabase's 1000-row response cap worth of records.
-    const withStatus = visible
-      .map(ot => ({ ot, statusField: fields.find(f => f.object_type_id === ot.id && f.is_status_field) }))
-      .filter(x => x.statusField)
-    Promise.all(withStatus.map(async ({ ot, statusField }) => {
-      const data = await aggregateFieldCounts(ot.id, statusField)
-      const byName = new Map(data.map(d => [d.name.toLowerCase(), d]))
-      const large = PROMINENT_STATUSES.map(name => byName.get(name.toLowerCase())).filter(Boolean)
-      const largeNames = new Set(large.map(d => d.name.toLowerCase()))
-      const small = data.filter(d => !largeNames.has(d.name.toLowerCase()) && d.count > 0)
-      return { ot, large, small }
-    })).then(sections => {
-      setStatusSections(sections.filter(s => s.large.length > 0 || s.small.length > 0))
-    })
+    // Status breakdown is scoped to whichever of the two types is selected
+    // in the toggle, not stacked for every qualifying type — one count:
+    // 'exact' query (see aggregateFieldCounts) for just that type, accurate
+    // even past Supabase's 1000-row response cap. resolveStatusField falls
+    // back to a free-typed text field for types like Ria Other Leads that
+    // don't have a flagged is_status_field.
+    const chosenOt = visible.find(ot => ot.name === selectedType)
+    const chosenStatusField = chosenOt && resolveStatusField(chosenOt.id, fields.filter(f => f.object_type_id === chosenOt.id))
+    if (chosenOt && chosenStatusField) {
+      aggregateFieldCounts(chosenOt.id, chosenStatusField).then(data => {
+        const byName = new Map(data.map(d => [d.name.toLowerCase(), d]))
+        const large = PROMINENT_STATUSES.map(name => byName.get(name.toLowerCase())).filter(Boolean)
+        const largeNames = new Set(large.map(d => d.name.toLowerCase()))
+        const small = data.filter(d => !largeNames.has(d.name.toLowerCase()) && d.count > 0)
+        setStatusSections(large.length > 0 || small.length > 0 ? [{ ot: chosenOt, large, small }] : [])
+      })
+    } else {
+      setStatusSections([])
+    }
 
     if (profile?.org_id) {
       supabase.from('appointments')
         .select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id)
         .then(({ count }) => setAppointmentCount(count || 0))
     }
-  }, [objectTypes.length, fields.length, profile?.org_id])
+  }, [objectTypes.length, fields.length, profile?.org_id, selectedType])
 
   return (
     <div>
@@ -97,8 +108,19 @@ export default function Dashboard() {
         </Link>
       </div>
 
+      {breakdownTypes.length > 0 && (
+        <div className="mt-8 flex items-center gap-2">
+          {breakdownTypes.map(name => (
+            <button key={name} onClick={() => setSelectedType(name)}
+              className={`chip border px-3 py-1.5 text-xs ${selectedType === name ? 'bg-brand text-white border-brand' : 'border-line text-muted hover:bg-black/5'}`}>
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
+
       {statusSections.map(sec => (
-        <div key={sec.ot.id} className="mt-8">
+        <div key={sec.ot.id} className="mt-4">
           <h2 className="mb-3 text-sm font-semibold text-muted">{sec.ot.name} by status</h2>
 
           {sec.large.length > 0 && (
