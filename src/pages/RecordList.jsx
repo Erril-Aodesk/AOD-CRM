@@ -19,9 +19,10 @@ const DEFAULT_COL_WIDTH = 160
 // for anything beyond a quick glance.
 const KANBAN_CAP = 10
 // Ria Other Leads shows Status as plain text in the table instead of the
-// editable dropdown every other record type uses — scoped by name so it
-// doesn't touch any other type's behavior.
-const TEXT_ONLY_STATUS_TYPES = ['Ria Other Leads']
+// editable dropdown every other record type uses — scoped by id (not name,
+// which can drift if the type is ever renamed) so it doesn't touch any
+// other type's behavior.
+const TEXT_ONLY_STATUS_TYPE_IDS = ['9d0dc1be-9c8e-4e0a-b8bc-cd86ad3cb7b4']
 
 export default function RecordList() {
   const { objectTypeId } = useParams()
@@ -83,7 +84,7 @@ export default function RecordList() {
   ).sort((a, b) => a.sort_order - b.sort_order)
   // Status is free-typed (not a fixed option list) on Ria Other Leads, so its
   // filter is a substring text box instead of the usual value dropdown.
-  const isTextStatusFilter = (f) => f.is_status_field && TEXT_ONLY_STATUS_TYPES.includes(ot?.name)
+  const isTextStatusFilter = (f) => f.is_status_field && TEXT_ONLY_STATUS_TYPE_IDS.includes(objectTypeId)
 
   // Select/status options come straight from the field's own admin-defined
   // list — always complete, no query needed. Free-text filterable fields
@@ -385,7 +386,7 @@ export default function RecordList() {
                       onClick={() => nav(`/records/${objectTypeId}/${r.id}`)}>
                     {cols.map(c => {
                       const editable = perms?.canEdit(objectTypeId) && perms?.fieldEditable(c.id)
-                      if (editable && c.is_status_field && !TEXT_ONLY_STATUS_TYPES.includes(ot.name)) {
+                      if (editable && c.is_status_field && !TEXT_ONLY_STATUS_TYPE_IDS.includes(objectTypeId)) {
                         return <td key={c.id} className="td">
                           <StatusCell field={c} value={r.data[c.key]} onSave={v => saveField(r, c, v)}
                             onAppointment={revert => setAppointmentState({ record: r, revert })} />
