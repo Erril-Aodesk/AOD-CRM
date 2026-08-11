@@ -34,6 +34,11 @@ export default function RecordList() {
   // instead of once you pause typing is a lot of avoidable load.
   const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
+  // Immediate text shown in the free-typed status filter box (Ria Other
+  // Leads only); debounced into filterValues the same way search is, via
+  // filterDebounceRef below, so typing doesn't fire a query per keystroke.
+  const [filterInputs, setFilterInputs] = useState({})
+  const filterDebounceRef = useRef({})
   const [deleteAll, setDeleteAll] = useState(false)
   const [toast, setToast] = useState('')
   const [view, setView] = useState('list')
@@ -76,6 +81,9 @@ export default function RecordList() {
     (f.field_type === 'select' || f.is_status_field ||
       FILTERABLE_TEXT_FIELDS.includes(f.key?.toLowerCase()) || FILTERABLE_TEXT_FIELDS.includes(f.label?.toLowerCase()))
   ).sort((a, b) => a.sort_order - b.sort_order)
+  // Status is free-typed (not a fixed option list) on Ria Other Leads, so its
+  // filter is a substring text box instead of the usual value dropdown.
+  const isTextStatusFilter = (f) => f.is_status_field && TEXT_ONLY_STATUS_TYPES.includes(ot?.name)
 
   // Select/status options come straight from the field's own admin-defined
   // list — always complete, no query needed. Free-text filterable fields
@@ -160,9 +168,13 @@ export default function RecordList() {
     filterableFields.forEach(f => {
       const sel = filterValues[f.id]
       if (!sel) return
-      query = f.field_type === 'multiselect'
-        ? query.contains(`data->${f.key}`, [sel])
-        : query.eq(`data->>${f.key}`, sel)
+      if (isTextStatusFilter(f)) {
+        query = query.ilike(`data->>${f.key}`, `%${sel}%`)
+      } else {
+        query = f.field_type === 'multiselect'
+          ? query.contains(`data->${f.key}`, [sel])
+          : query.eq(`data->>${f.key}`, sel)
+      }
     })
     return query
   }
@@ -312,7 +324,18 @@ export default function RecordList() {
 
       {filterableFields.length > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          {filterableFields.map(f => (
+          {filterableFields.map(f => isTextStatusFilter(f) ? (
+            <input key={f.id} className="input w-auto min-w-[140px]" placeholder={`Filter ${f.label}…`}
+              value={filterInputs[f.id] ?? filterValues[f.id] ?? ''}
+              onChange={e => {
+                const val = e.target.value
+                setFilterInputs(v => ({ ...v, [f.id]: val }))
+                clearTimeout(filterDebounceRef.current[f.id])
+                filterDebounceRef.current[f.id] = setTimeout(() => {
+                  setFilterValues(v => ({ ...v, [f.id]: val })); setPage(1)
+                }, 300)
+              }} />
+          ) : (
             <select key={f.id} className="input w-auto min-w-[140px]" value={filterValues[f.id] || ''}
               onChange={e => { setFilterValues(v => ({ ...v, [f.id]: e.target.value })); setPage(1) }}>
               <option value="">{f.label}: All</option>
@@ -320,7 +343,7 @@ export default function RecordList() {
             </select>
           ))}
           {activeFilterCount > 0 &&
-            <button className="btn-ghost text-sm" onClick={() => { setFilterValues({}); setPage(1) }}>Clear filters</button>}
+            <button className="btn-ghost text-sm" onClick={() => { setFilterValues({}); setFilterInputs({}); setPage(1) }}>Clear filters</button>}
         </div>
       )}
 
