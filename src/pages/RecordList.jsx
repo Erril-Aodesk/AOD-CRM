@@ -231,8 +231,10 @@ export default function RecordList() {
   // "Dialed today" = status_history rows logged today for this type's
   // records that the current agent owns (no changed_by column exists, so
   // ownership is the same stand-in the Activity page uses for "who called").
+  // Admins/managers don't dial leads themselves, so the chip (and this
+  // query) is skipped for them rather than showing a near-always-0 count.
   useEffect(() => {
-    if (!objectTypeId || !profile?.org_id || !profile?.id) return
+    if (!objectTypeId || !profile?.org_id || !profile?.id || perms?.isManager) return
     const start = new Date(); start.setUTCHours(0, 0, 0, 0)
     const end = new Date(start); end.setUTCDate(end.getUTCDate() + 1)
     supabase.from('status_history')
@@ -240,7 +242,7 @@ export default function RecordList() {
       .eq('org_id', profile.org_id).eq('object_type_id', objectTypeId).eq('records.owner_id', profile.id)
       .gte('changed_at', start.toISOString()).lt('changed_at', end.toISOString())
       .then(({ count }) => setDialedToday(count || 0))
-  }, [objectTypeId, profile?.org_id, profile?.id])
+  }, [objectTypeId, profile?.org_id, profile?.id, perms?.isManager])
 
   useEffect(() => {
     if (view === 'kanban') loadKanbanData()
@@ -319,7 +321,8 @@ export default function RecordList() {
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold">{ot.name}</h1>
         <span className="chip bg-brand-soft text-brand-dark">{listCount}</span>
-        <span className="chip border border-line text-muted" title="Your status changes today">{dialedToday} dialed today</span>
+        {!perms?.isManager &&
+          <span className="chip border border-line text-muted" title="Your status changes today">{dialedToday} dialed today</span>}
         <div className="inline-flex rounded-lg border border-line p-0.5">
           <button className={`rounded-md px-2.5 py-1.5 ${view === 'list' ? 'bg-brand text-white' : 'text-muted hover:text-ink'}`}
             title="List view" onClick={() => setView('list')}><List size={15} /></button>
