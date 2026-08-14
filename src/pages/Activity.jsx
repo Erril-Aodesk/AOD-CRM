@@ -88,6 +88,28 @@ export default function Activity() {
     fetchRangeChanges(otId, ot.org_id, start, end).then(setChanges)
   }, [otId, ot?.org_id, fromDate, toDate])
 
+  // Live-append new status changes as they happen, if they fall within the
+  // currently selected range (status_history rows are inserted by a DB
+  // trigger on `records`, not by this app, so this is the only way to see
+  // them without re-fetching).
+  useEffect(() => {
+    if (!otId || !ot?.org_id) return
+    const { start, end } = rangeBounds(fromDate, toDate)
+    const ch = supabase.channel(`status_history:${otId}`)
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'status_history', filter: `object_type_id=eq.${otId}` },
+        async ({ new: row }) => {
+          if (row.org_id !== ot.org_id) return
+          const changedAt = new Date(row.changed_at)
+          if (start && changedAt < new Date(start)) return
+          if (changedAt >= new Date(end)) return
+          const { data: record } = await supabase.from('records').select('owner_id, data').eq('id', row.record_id).single()
+          setChanges(prev => prev ? [{ ...row, records: record }, ...prev] : prev)
+        })
+      .subscribe()
+    return () => supabase.removeChannel(ch)
+  }, [otId, ot?.org_id, fromDate, toDate])
+
   const applyPreset = (key) => {
     const today = todayStr()
     if (key === 'today') { setFromDate(today); setToDate(today) }
