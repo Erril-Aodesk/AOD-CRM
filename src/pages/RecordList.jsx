@@ -45,6 +45,7 @@ export default function RecordList() {
   const [page, setPage] = useState(1)
   const [listRows, setListRows] = useState(null)
   const [listCount, setListCount] = useState(0)
+  const [dialedToday, setDialedToday] = useState(0)
   const [appointmentState, setAppointmentState] = useState(null)
 
   const ot = objectTypes.find(o => o.id === objectTypeId)
@@ -227,6 +228,20 @@ export default function RecordList() {
     loadListRows()
   }, [objectTypeId, q, filterValues, pageSize, currentPage])
 
+  // "Dialed today" = status_history rows logged today for this type's
+  // records that the current agent owns (no changed_by column exists, so
+  // ownership is the same stand-in the Activity page uses for "who called").
+  useEffect(() => {
+    if (!objectTypeId || !profile?.org_id || !profile?.id) return
+    const start = new Date(); start.setUTCHours(0, 0, 0, 0)
+    const end = new Date(start); end.setUTCDate(end.getUTCDate() + 1)
+    supabase.from('status_history')
+      .select('id, records!inner(owner_id)', { count: 'exact', head: true })
+      .eq('org_id', profile.org_id).eq('object_type_id', objectTypeId).eq('records.owner_id', profile.id)
+      .gte('changed_at', start.toISOString()).lt('changed_at', end.toISOString())
+      .then(({ count }) => setDialedToday(count || 0))
+  }, [objectTypeId, profile?.org_id, profile?.id])
+
   useEffect(() => {
     if (view === 'kanban') loadKanbanData()
   }, [view, objectTypeId, q, filterValues, statusField?.id])
@@ -304,6 +319,7 @@ export default function RecordList() {
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold">{ot.name}</h1>
         <span className="chip bg-brand-soft text-brand-dark">{listCount}</span>
+        <span className="chip border border-line text-muted" title="Your status changes today">{dialedToday} dialed today</span>
         <div className="inline-flex rounded-lg border border-line p-0.5">
           <button className={`rounded-md px-2.5 py-1.5 ${view === 'list' ? 'bg-brand text-white' : 'text-muted hover:text-ink'}`}
             title="List view" onClick={() => setView('list')}><List size={15} /></button>

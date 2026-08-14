@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { aggregateFieldCounts } from '../lib/reportAggregates'
 import { resolveStatusField } from '../lib/fieldMatch'
-import { PhoneCall, PhoneOutgoing, Tag, CalendarCheck } from 'lucide-react'
+import { PhoneCall, Tag, CalendarCheck } from 'lucide-react'
 
 // The "by status" breakdown below shows one record type at a time, switched
 // via a toggle rather than stacking every qualifying type — these are the
@@ -29,7 +29,6 @@ export default function Dashboard() {
   const [dueCount, setDueCount] = useState(0)
   const [statusSections, setStatusSections] = useState([])
   const [appointmentCount, setAppointmentCount] = useState(0)
-  const [dialedToday, setDialedToday] = useState(0)
   const visible = objectTypes.filter(ot => perms?.canView(ot.id))
   const breakdownTypes = STATUS_BREAKDOWN_TYPES.filter(name => visible.some(ot => ot.name === name))
   const [selectedType, setSelectedType] = useState(STATUS_BREAKDOWN_TYPES[0])
@@ -81,27 +80,14 @@ export default function Dashboard() {
         .select('id', { count: 'exact', head: true }).eq('org_id', profile.org_id)
         .then(({ count }) => setAppointmentCount(count || 0))
     }
-
-    // "Numbers dialed today" = status_history rows logged today for records
-    // this agent currently owns (no changed_by column exists, so ownership
-    // is the same stand-in the Activity page uses for "who made the call").
-    if (profile?.org_id && profile?.id) {
-      const start = new Date(); start.setUTCHours(0, 0, 0, 0)
-      const end = new Date(start); end.setUTCDate(end.getUTCDate() + 1)
-      supabase.from('status_history')
-        .select('id, records!inner(owner_id)', { count: 'exact', head: true })
-        .eq('org_id', profile.org_id).eq('records.owner_id', profile.id)
-        .gte('changed_at', start.toISOString()).lt('changed_at', end.toISOString())
-        .then(({ count }) => setDialedToday(count || 0))
-    }
-  }, [objectTypes.length, fields.length, profile?.org_id, profile?.id, selectedType])
+  }, [objectTypes.length, fields.length, profile?.org_id, selectedType])
 
   return (
     <div>
       <h1 className="text-xl font-semibold">Welcome back{profile?.full_name ? `, ${profile.full_name.split(' ')[0]}` : ''}</h1>
       <p className="mt-1 text-sm text-muted">Here's where things stand today.</p>
 
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Link to="/callbacks" className="card p-5 hover:shadow-pop transition-shadow">
           <div className="flex items-center gap-3">
             <div className="grid h-10 w-10 place-items-center rounded-lg bg-warn/10 text-warn"><PhoneCall size={20} /></div>
@@ -117,15 +103,6 @@ export default function Dashboard() {
             <div>
               <p className="text-2xl font-semibold">{appointmentCount}</p>
               <p className="text-sm text-muted">Appointments</p>
-            </div>
-          </div>
-        </Link>
-        <Link to="/activity" className="card p-5 hover:shadow-pop transition-shadow">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-lg bg-ok/10 text-ok"><PhoneOutgoing size={20} /></div>
-            <div>
-              <p className="text-2xl font-semibold">{dialedToday}</p>
-              <p className="text-sm text-muted">Numbers dialed today</p>
             </div>
           </div>
         </Link>
